@@ -6,6 +6,7 @@ CREATE TABLE vendors (
   normalized_name TEXT NOT NULL UNIQUE,
   category TEXT,
   country TEXT,
+  notes TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','blocked')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
@@ -14,7 +15,8 @@ CREATE TABLE vendor_contacts (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  email TEXT NOT NULL CHECK (email LIKE '_%@_%._%'),
+  email TEXT CHECK (email LIKE '_%@_%._%'),
+  phone TEXT, -- TODO: add format check after normalizing inputs
   role TEXT,
   is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

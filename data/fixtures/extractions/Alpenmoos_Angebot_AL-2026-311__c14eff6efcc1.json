@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "file_name": "Alpenmoos_Angebot_AL-2026-311.docx",
+    "sha256": "07c79696acb3a2d4d54284312f42d998cf4eff54d7a922c6e5888549956b6a49",
+    "doc_type": "quote",
+    "model": "claude-haiku-5-5",
+    "schema_version": 3,
+    "usage": {
+      "input_tokens": 872,
+      "output_tokens": 1180,
+      "cache_write_tokens": 2660,
+      "cache_read_tokens": 0
+    },
+    "extracted_at": "2026-11-11T05:48:08+00:00"
+  },
+  "status": "invalid",
+  "data": {
+    "vendor_name": "Alpenmoos Analytik GmbH",
+    "reference_number": "AL-2026-311",
+    "rfq_reference": "RFQ-2026-015",
+    "quote_date": "2026-10-07",
+    "valid_until": "2026-12-06",
+    "total_amount": 12800.0,
+    "currency": "EUR",
+    "delivery_time_text": "null",
+    "delivery_time_days": "null",
+    "source_language": "de",
+    "answers_rfq": "yes",
+    "confidence": 0.8,
+    "requires_nda": true,
+    "terms": "Net 30 days. Payment 30% on order, 70% after final report. Prices plus statutory VAT where applicable (US customers: reverse charge / not taxable). Conditional on a valid NDA (CDA dated 15.11.2024).",
+    "line_items": [
+      {
+        "description": "Stabilitätsstudie: 25 °C/60% r.F. und 40 °C/75% r.F.; Zeitpunkte 0, 1, 3, 6 Monate",
+        "description_en": "Stability study: 25 °C/60% RH and 40 °C/75% RH; time points 0, 1, 3, 6 months",
+        "item_type": "main",
+        "quantity": 1,
+        "unit": "study",
+        "unit_price": 9600.0,
+        "line_total": 9600.0
+      },
+      {
+        "description": "Analytik je Zeitpunkt: Aussehen, Gehalt, verwandte Substanzen (HPLC)",
+        "description_en": "Analytics per time point: appearance, assay, related substances (HPLC)",
+        "item_type": "main",
+        "quantity": 8,
+        "unit": "time point",
+        "unit_price": 320.0,
+        "line_total": 2560.0
+      },
+      {
+        "description": "Abschlussbericht (Englisch)",
+        "description_en": "Final report (English)",
+        "item_type": "main",
+        "quantity": 1,
+        "unit": "report",
+        "unit_price": 640.0,
+        "line_total": 640.0
+      }
+    ],
+    "flags": [
+      "Delivery time not stated in the quotation.",
+      "Line 1 shows a price of 9,600.00 but no quantity or line-total column value is clearly printed for it in the table, so the extraction assumes quantity 1.",
+      "Line 2 unit is inferred as 'time point' from the description; the quoted unit is not stated.",
+      "Analytics are priced for 8 time points while the study schedule lists 0, 1, 3, 6 months (4 points), so the count of 8 needs checking against the scope."
+    ],
+    "field_sources": [
+      {
+        "field": "total_amount",
+        "snippet": "Summe netto / Net total | | 12.800,00"
+      },
+      {
+        "field": "quote_date",
+        "snippet": "Datum / Date | 07.10.2026"
+      },
+      {
+        "field": "valid_until",
+        "snippet": "Gültig bis / Valid until | 06.12.2026"
+      }
+    ]
+  },
+  "errors": [
+    "delivery_time_days: Input should be a valid integer, unable to parse string as an integer"
+  ]
+}

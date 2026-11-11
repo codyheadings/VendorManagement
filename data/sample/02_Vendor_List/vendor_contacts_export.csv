@@ -1,0 +1,11 @@
+Vendor name,Country,Category,Main contact,Email,Phone,NDA on file,Notes
+Halvorsen Fine Synthesis Ltd,UK,Custom synthesis,Dr. Fiona Ashdown,f.ashdown@halvorsen-synthesis.example,+44 1223 000 140,No,Sent their own NDA
+Kestrelmoor Chemical Inc.,USA,Custom synthesis,Marcus Bell,mbell@kestrelmoor.example,+1 732 555 0147,Yes,MSA under negotiation
+Kestrelmoor Chemical,US,Chemistry,Accounts Receivable,ar@kestrelmoor.example,,,billing contact
+"Jiangling Haorun Fine Chemicals Co., Ltd.",China,Custom synthesis,Lily Zhou,lily.zhou@jl-haorun.example,+86 21 5555 0192,Yes,
+Pinewick Bioservices LLC,USA,CRO / synthesis,Dana Okafor,dokafor@pinewick.example,+1 919 555 0163,Yes,
+Marrowfield Lab Supply,USA,Catalog & custom,Ray Delgado,,+1 512 555 0110,No,Only sends faxed/scanned quotes
+Corrivale Organics Pvt. Ltd.,India,Custom synthesis,Arjun Mehta,arjun.m@corrivale.example,,No,
+Alpenmoos Analytik GmbH,Germany,Analytical testing,Dr. Katrin Vogel,k.vogel@alpenmoos-analytik.example,+49 761 555 0175,Yes (2024),
+Quillbrook Analytical Labs,USA,Analytical testing,Priya Raman,praman@quillbrook.example,+1 612 555 0188,?,check with legal
+Pinewick Bio Services,USA,,Dana Okafor,dokafor@pinewick.example,,,dup?

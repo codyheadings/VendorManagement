@@ -101,9 +101,8 @@ def ensure_db() -> None:
     if is_initialized():
         return
     init_db()
-    # Optional: load mock data on a fresh DB.
-    # import seed
-    # seed.run()
+    import seed
+    seed.run()
 
 
 if __name__ == "__main__":
