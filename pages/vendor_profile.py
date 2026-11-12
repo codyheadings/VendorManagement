@@ -482,13 +482,17 @@ def render_vendor_quotes(quotes, key_prefix="vendor"):
 
                     review_status = q["review_status"] or "unknown"
 
-                    st.badge(
-                        review_status.capitalize(),
-                        color=REVIEW_COLORS.get(
-                            review_status,
-                            "gray"
-                        ),
-                    )
+                    with st.container(horizontal=True, vertical_alignment="center"):
+                        st.badge(
+                            review_status.capitalize(),
+                            color=REVIEW_COLORS.get(
+                                review_status,
+                                "gray"
+                            ),
+                        )
+                        if (review_status == "pending"):
+                            if st.button("Review"):
+                                st.switch_page("pages/review_queue.py")
 
                     if q["superseded"]:
                         st.caption("Superseded by revision")

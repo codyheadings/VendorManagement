@@ -136,10 +136,17 @@ with st.container(height=540, border=True):
                 cols[4].caption(":red[Expired]")
 
             with cols[5]:
-                st.badge(
-                    q["review_status"].capitalize(),
-                    color=REVIEW_COLORS.get(q["review_status"], "gray"),
-                )
+                with st.container(horizontal=True, vertical_alignment="center"):
+                    st.badge(
+                        q["review_status"].capitalize(),
+                        color=REVIEW_COLORS.get(
+                            q["review_status"],
+                            "gray"
+                        ),
+                    )
+                    if (q["review_status"] == "pending"):
+                        if st.button("Review"):
+                            st.switch_page("pages/review_queue.py")
                 if q["superseded"]:
                     st.caption("Superseded by revision")
                 elif q["review_status"] == "pending" and q["confidence"] is not None:

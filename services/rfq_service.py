@@ -165,3 +165,43 @@ def add_rfq(rfq_data: dict, pdf_path: str) -> int:
 
     except (ValueError, TypeError) as e:
         raise ValueError(f"Invalid RFQ data: {e}") from e
+
+class RfqError(ValueError):
+    """A problem the person can read: the message is safe to show."""
+ 
+ 
+def mark_rfq_sent(rfq_id: int | None, vendor_ids: list[int]) -> None:
+    """Record that these vendors were emailed: their invitations become 'sent' and a draft RFQ becomes 'open'.
+ 
+    One transaction, and it raises instead of silently doing nothing (an UPDATE that matches no row looks
+    like success), so a missing RFQ id can never slip through unnoticed.
+    """
+    if not rfq_id:
+        raise RfqError("no RFQ id: the RFQ must be created before it can be marked as sent")
+    if not vendor_ids:
+        return
+    with db.transaction() as conn:
+        rfq = conn.execute("SELECT id, status FROM rfqs WHERE id = ?", (rfq_id,)).fetchone()
+        if rfq is None:
+            raise RfqError(f"RFQ #{rfq_id} does not exist")
+        if rfq["status"] in ("closed", "cancelled"):
+            raise RfqError(f"RFQ #{rfq_id} is {rfq['status']}; it cannot be sent")
+        for vendor_id in vendor_ids:
+            conn.execute(
+                """INSERT INTO rfq_invitations (rfq_id, vendor_id, status, sent_at) VALUES (?, ?, 'sent', ?)
+                   ON CONFLICT(rfq_id, vendor_id) DO UPDATE SET
+                       status = CASE WHEN status IN ('draft') THEN 'sent' ELSE status END,
+                       sent_at = CASE WHEN status IN ('draft') THEN excluded.sent_at ELSE sent_at END""",
+                (rfq_id, vendor_id, db.TODAY))
+        conn.execute("UPDATE rfqs SET status = 'open' WHERE id = ? AND status = 'draft'", (rfq_id,))
+ 
+ 
+def vendors_not_yet_sent(rfq_id: int | None, vendor_ids: list[int]) -> list[int]:
+    """Of the selected vendors, those who have not already been sent this RFQ (stops double emailing)."""
+    if not rfq_id or not vendor_ids:
+        return list(vendor_ids)
+    marks = ",".join("?" * len(vendor_ids))
+    done = {r["vendor_id"] for r in db.query(
+        f"SELECT vendor_id FROM rfq_invitations WHERE rfq_id = ? AND vendor_id IN ({marks}) "
+        "AND status IN ('sent','replied','declined')", (rfq_id, *vendor_ids))}
+    return [v for v in vendor_ids if v not in done]

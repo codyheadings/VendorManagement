@@ -1,18 +1,19 @@
-"""What happens when someone uploads a file in the app.
+"""What happens when someone uploads a file in the app. No Streamlit in here, so it is testable.
 
-    kind = "vendors" | "rfq" | "quote"* | "email"* | "legal"*      (chosen by the person, not assumed)
+    kind = "vendors" | "rfq" | "quote" | "email" | "legal"      (chosen by the person, never guessed)
     saved = save_upload(name, data)             # safety checks, then a private temp copy
     pre   = preview(kind, saved)                # read-only: shows what WOULD happen
     out   = commit(kind, saved, allow_ai=True)  # does it
 
 The chosen kind decides which code runs, so a quote is never mistaken for an RFQ.
-*Only the three AI kinds can call an LLM, and only when there is no cached result for the file.
+Only the three AI kinds can cost money, and only when there is no cached result for the file.
 """
 import re
 import tempfile
+from email.message import EmailMessage
 from dataclasses import dataclass, field
 from pathlib import Path
-
+import doctype_check
 import db
 import extract
 import loader
@@ -30,6 +31,9 @@ UPLOAD_KINDS = {
 }
 AI_KINDS = {"quote", "email", "legal"}
 _STAGING = Path(tempfile.gettempdir()) / "uploads"
+PASTE_KINDS = {"vendors", "email", "quote", "legal"}      # types that also accept pasted text
+MAX_PASTE_CHARS = 100_000
+_HEADER_RE = re.compile(r"^(From|To|Date|Subject|Cc):[ \t]*(.*)$", re.IGNORECASE)
 
 
 class UploadError(ValueError):
@@ -44,6 +48,7 @@ class Preview:
     warnings: list[str] = field(default_factory=list)
     needs_ai: bool = False
     already_loaded: bool = False
+    type_warning: str | None = None
 
 
 def save_upload(name: str, data: bytes, kind: str) -> Path:
@@ -63,6 +68,54 @@ def save_upload(name: str, data: bytes, kind: str) -> Path:
     target = Path(tempfile.mkdtemp(dir=_STAGING)) / safe
     target.write_bytes(data)
     return target
+
+
+def _email_from_text(text: str) -> tuple[str, str, bool]:
+    """Pasted email -> (file name, content, had_sender). Leading 'From:/Date:/Subject:' lines become real
+    headers, so the sender address can identify the vendor exactly as it does for an .eml file."""
+    headers, body_lines, lines = {}, [], text.splitlines()
+    i = 0
+    while i < len(lines) and _HEADER_RE.match(lines[i].strip()):
+        key, value = _HEADER_RE.match(lines[i].strip()).groups()
+        headers[key.title()] = value.strip()
+        i += 1
+    if "From" in headers:
+        try:
+            msg = EmailMessage()
+            for key, value in headers.items():
+                msg[key] = value
+            msg.set_content("\n".join(lines[i:]).strip() or "(empty)")
+            return "pasted_email.eml", msg.as_string(), True
+        except Exception:
+            pass
+    return "pasted_email.txt", text, False
+ 
+ 
+def save_pasted(text: str, kind: str) -> tuple[Path, list[str]]:
+    """Stage pasted text as a file so it goes through exactly the same pipeline as an upload.
+ 
+    Returns (path, notes to show in the preview)."""
+    if kind not in PASTE_KINDS:
+        raise UploadError("pasting text is not available for this type")
+    text = (text or "").strip()
+    if not text:
+        raise UploadError("nothing was pasted")
+    if len(text) > MAX_PASTE_CHARS:
+        raise UploadError(f"the pasted text is {len(text):,} characters; the limit is {MAX_PASTE_CHARS:,}")
+    notes: list[str] = []
+    if kind == "vendors":
+        name, content = "pasted_vendors.csv", text
+    elif kind == "email":
+        name, content, had_sender = _email_from_text(text)
+        if not had_sender:
+            notes.append("No 'From:' line found, so the vendor is matched by name only. "
+                         "Paste the From: / Date: / Subject: lines too for a more reliable match.")
+    else:
+        name, content = f"pasted_{kind}.txt", text
+    _STAGING.mkdir(parents=True, exist_ok=True)
+    target = Path(tempfile.mkdtemp(dir=_STAGING)) / name
+    target.write_text(content, encoding="utf-8")
+    return target, notes
 
 
 class _Rollback(Exception):
@@ -121,8 +174,10 @@ def _ai_preview(kind: str, path: Path) -> Preview:
     cached = res.status != "dry-run"
     if res.status == "error":
         return Preview(False, path.name, warnings=[res.message])
-    rows = [("File", path.name), ("Type", kind), ("Extraction", "cached, free" if cached else "needs one AI call (about a tenth of a cent)")]
-    return Preview(True, path.name, rows, list(res.notes or []), needs_ai=not cached)
+    rows = [("File", path.name), ("Type", kind), ("Extraction", "cached, free" if cached else "will be extracted by AI")]
+    check = doctype_check.check_type(kind, path)
+    return Preview(True, path.name, rows, list(res.notes or []), needs_ai=not cached,
+                   type_warning=check.message if check else None)
 
 
 def preview(kind: str, path: Path) -> Preview:
@@ -136,8 +191,16 @@ def preview(kind: str, path: Path) -> Preview:
     raise UploadError(f"unknown upload type {kind!r}")
 
 
-def commit(kind: str, path: Path, allow_ai: bool = False, client=None) -> loader.Outcome | seed.ImportReport:
-    """Do it. AI is used only when allow_ai is set (the person pressed the button)."""
+def commit(kind: str, path: Path, allow_ai: bool = False, client=None,
+           type_confirmed: bool = False) -> loader.Outcome | seed.ImportReport:
+    """Commit it. AI is used only when allow_ai is set (the person pressed the button).
+ 
+    A file that looks like the wrong kind is refused until type_confirmed is set, so the check cannot be
+    skipped by the screen and no API call is made for it."""
+    if kind in doctype_check.CHECKED_KINDS and not type_confirmed:
+        check = doctype_check.check_type(kind, path)
+        if check:
+            raise UploadError(check.message)
     if kind == "vendors":
         with db.transaction() as conn:
             return seed.seed_vendors_from_csv(conn, path)

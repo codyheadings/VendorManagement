@@ -2,8 +2,9 @@ from datetime import datetime
 from pathlib import Path
 import streamlit as st
 import db
+import notify
 from services.email_service import build_rfq_email, send_rfq_email
-from services.rfq_service import add_rfq, get_next_rfq_number
+from services.rfq_service import *
 from io import BytesIO
 from services.rfq_pdf_service import generate_rfq_pdf
 from services.vendor_service import add_vendor_with_contact
@@ -15,6 +16,8 @@ st.set_page_config(
     page_title="Dashboard",
     layout="wide"
 )
+
+notify.run_if_due()
 
 # Main page content
 st.markdown("# Vendor Overview")
@@ -403,7 +406,6 @@ def show_rfq_form():
 
     submit_col, download_col, email_col, _ = st.columns([.4, .4, 2, 1])
     send_results = st.container()
-    st.session_state.new_rfq_id = None
 
     with submit_col:
         submitted = st.button(
@@ -452,11 +454,15 @@ def show_rfq_form():
                     pdf_bytes = st.session_state.submitted_pdf
 
                     sent_vendors = []
+                    sent_ids = []
                     skipped_vendors = []
                     failed_vendors = []
 
+                    rfq_id = st.session_state.new_rfq_id
+                    selected = vendors_not_yet_sent(rfq_id, st.session_state.selected_vendor_ids)
+
                     with st.spinner("Sending RFQ emails to selected vendors..."):
-                        for vendor_id in st.session_state.selected_vendor_ids:
+                        for vendor_id in selected:
                             vendor = get_vendor_primary_contact(vendor_id)
 
                             if not vendor or not vendor["contact_name"] or not vendor["email"]:
@@ -469,6 +475,7 @@ def show_rfq_form():
                                 email = build_rfq_email(vendor, pdf_data, pdf_bytes)
                                 send_rfq_email(email)
                                 sent_vendors.append(vendor["vendor_name"])
+                                sent_ids.append(vendor["vendor_id"])
 
                             except Exception as e:
                                 failed_vendors.append({
@@ -476,20 +483,12 @@ def show_rfq_form():
                                     "error": str(e)
                                 })
 
-                    # Update RFQ status if at least one email was successfully sent
-                    if sent_vendors:
+                    # Track the vendor IDs actually emailed in sent_ids:
+                    if sent_ids:
                         try:
-                            db.execute(
-                                """
-                                UPDATE rfqs
-                                SET status = 'open'
-                                WHERE id = ?
-                                """,
-                                (st.session_state.new_rfq_id,)
-                            )
-
-                        except Exception as e:
-                            st.error(f"Emails were sent, but RFQ status could not be updated: {e}")
+                            mark_rfq_sent(rfq_id, sent_ids)
+                        except RfqError as e:
+                            st.error(f"Emails were sent, but the RFQ could not be marked as sent: {e}")
 
                     # Store results after sending is complete
                     st.session_state.send_results = {
@@ -654,6 +653,7 @@ with vendors_col:
                 st.session_state.submitted_pdf = None
                 st.session_state.submitted_rfq_id = None
                 st.session_state.send_results = None
+                st.session_state.new_rfq_id = None
                 show_rfq_form()
 
     with deselect_col:

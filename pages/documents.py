@@ -74,10 +74,11 @@ def render_documents(documents, key_prefix="all"):
                 # Status
                 if status:
                     with cols[4]:
-                        st.badge(
-                            status.capitalize(),
-                            color=STATUS_COLORS.get(status, "gray"),
-                        )
+                        with st.container(horizontal=True, vertical_alignment="center"):
+                            st.badge(status.capitalize(), color=STATUS_COLORS.get(status,"gray"))
+                            if (status == "pending" or status == "unknown"):
+                                if st.button("Review"):
+                                    st.switch_page("pages/review_queue.py")
                 else:
                     cols[4].write("—")
 
