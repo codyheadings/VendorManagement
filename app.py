@@ -25,6 +25,7 @@ _setup()
 pages = {
     "": [
         st.Page("pages/vendors.py", title="Dashboard", icon=":material/analytics:", default=True),
+        st.Page("pages/review_queue.py", title="Review Queue", icon=":material/rate_review:"),
         st.Page("pages/vendor_profile.py", title="Vendor Profile", icon=":material/business:", visibility="hidden"),
     ],
     "Resources": [

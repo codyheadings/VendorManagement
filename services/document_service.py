@@ -105,3 +105,194 @@ def get_document_details(doc):
         return reference, status
 
     return "—", None
+
+def get_documents(category=None, search="", sort="Date", order="Descending"):
+    """Retrieve documents, optionally filtered by category and search."""
+
+    sort_columns = {
+        "Date": "d.created_at",
+        "Name": "d.file_name",
+        "Category": "d.category",
+    }
+
+    sort_by = sort_columns[sort]
+    order_by = "DESC" if order == "Descending" else "ASC"
+
+    like = f"%{search.strip()}%"
+
+    category_filter = category if category else None
+
+    return db.query(
+        f"""
+        SELECT
+            d.id,
+            d.file_name,
+            d.file_path,
+            d.mime_type,
+            d.category,
+            d.source,
+            d.created_at,
+
+            COALESCE(
+                (SELECT v.name
+                 FROM vendors v
+                 WHERE v.id = d.vendor_id),
+
+                (SELECT v.name
+                 FROM legal_documents l
+                 JOIN vendors v ON v.id = l.vendor_id
+                 WHERE l.document_id = d.id
+                 LIMIT 1),
+
+                (SELECT v.name
+                 FROM invoices i
+                 JOIN vendors v ON v.id = i.vendor_id
+                 WHERE i.document_id = d.id
+                 LIMIT 1)
+            ) AS vendor_name,
+
+            (SELECT r.rfq_number
+             FROM rfqs r
+             WHERE r.document_id = d.id
+             LIMIT 1) AS rfq_number,
+
+            (SELECT r.title
+             FROM rfqs r
+             WHERE r.document_id = d.id
+             LIMIT 1) AS rfq_title,
+
+            (SELECT r.status
+             FROM rfqs r
+             WHERE r.document_id = d.id
+             LIMIT 1) AS rfq_status,
+
+            (SELECT r.issue_date
+             FROM rfqs r
+             WHERE r.document_id = d.id
+             LIMIT 1) AS rfq_issue_date,
+
+            (SELECT r.due_date
+             FROM rfqs r
+             WHERE r.document_id = d.id
+             LIMIT 1) AS rfq_due_date,
+
+            (SELECT l.doc_type
+             FROM legal_documents l
+             WHERE l.document_id = d.id
+             LIMIT 1) AS legal_type,
+
+            (SELECT l.status
+             FROM legal_documents l
+             WHERE l.document_id = d.id
+             LIMIT 1) AS legal_status,
+
+            (SELECT l.review_status
+             FROM legal_documents l
+             WHERE l.document_id = d.id
+             LIMIT 1) AS legal_review_status,
+
+            (SELECT l.effective_date
+             FROM legal_documents l
+             WHERE l.document_id = d.id
+             LIMIT 1) AS effective_date,
+
+            (SELECT l.expiry_date
+             FROM legal_documents l
+             WHERE l.document_id = d.id
+             LIMIT 1) AS expiry_date,
+
+            (SELECT i.invoice_number
+             FROM invoices i
+             WHERE i.document_id = d.id
+             LIMIT 1) AS invoice_number,
+
+            (SELECT i.amount
+             FROM invoices i
+             WHERE i.document_id = d.id
+             LIMIT 1) AS invoice_amount,
+
+            (SELECT i.currency
+             FROM invoices i
+             WHERE i.document_id = d.id
+             LIMIT 1) AS invoice_currency,
+
+            (SELECT i.invoice_date
+             FROM invoices i
+             WHERE i.document_id = d.id
+             LIMIT 1) AS invoice_date,
+
+            (SELECT i.due_date
+             FROM invoices i
+             WHERE i.document_id = d.id
+             LIMIT 1) AS invoice_due_date,
+
+            (SELECT i.paid_date
+             FROM invoices i
+             WHERE i.document_id = d.id
+             LIMIT 1) AS paid_date
+
+        FROM documents d
+
+        WHERE d.category != 'quote'
+          AND (? IS NULL OR d.category = ?)
+
+          AND (
+              d.file_name LIKE ?
+              OR d.category LIKE ?
+              OR d.source LIKE ?
+
+              OR COALESCE(
+                  (SELECT v.name
+                   FROM vendors v
+                   WHERE v.id = d.vendor_id),
+
+                  (SELECT v.name
+                   FROM legal_documents l
+                   JOIN vendors v ON v.id = l.vendor_id
+                   WHERE l.document_id = d.id
+                   LIMIT 1),
+
+                  (SELECT v.name
+                   FROM invoices i
+                   JOIN vendors v ON v.id = i.vendor_id
+                   WHERE i.document_id = d.id
+                   LIMIT 1)
+              ) LIKE ?
+
+              OR EXISTS (
+                  SELECT 1 FROM rfqs r
+                  WHERE r.document_id = d.id
+                    AND (
+                        r.rfq_number LIKE ?
+                        OR r.title LIKE ?
+                    )
+              )
+
+              OR EXISTS (
+                  SELECT 1 FROM legal_documents l
+                  WHERE l.document_id = d.id
+                    AND l.doc_type LIKE ?
+              )
+
+              OR EXISTS (
+                  SELECT 1 FROM invoices i
+                  WHERE i.document_id = d.id
+                    AND i.invoice_number LIKE ?
+              )
+          )
+
+        ORDER BY {sort_by} {order_by}, d.id DESC
+        """,
+        (
+            category_filter,
+            category_filter,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+        ),
+    )

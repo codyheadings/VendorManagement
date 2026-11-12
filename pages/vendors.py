@@ -1,5 +1,5 @@
 from datetime import datetime
-import sqlite3
+from pathlib import Path
 import streamlit as st
 import db
 from services.email_service import build_rfq_email, send_rfq_email
@@ -9,6 +9,7 @@ from services.rfq_pdf_service import generate_rfq_pdf
 from services.vendor_service import add_vendor_with_contact
 from services.vendor_service import get_vendor_primary_contact
 from services.vendor_service import get_vendor_from_id
+from upload_dialog import show_upload_dialog
 
 st.set_page_config(
     page_title="Dashboard",
@@ -139,6 +140,30 @@ def build_rfq_data():
             if st.session_state[f"{row_id}_value"].strip()
         ],
     }
+
+def get_rfq_pdf_path(rfq_id: int) -> Path:
+    """Return the absolute path for an RFQ PDF and create its directory."""
+
+    rfq_dir = db.BASE_DIR / "data" / "rfqs"
+
+    rfq_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return rfq_dir / f"{rfq_id}.pdf"
+
+def get_stored_document_path(file_path: Path) -> str:
+    """Convert a file path to a project-relative database path."""
+
+    try:
+        return (
+            file_path.resolve()
+            .relative_to(db.BASE_DIR.resolve())
+            .as_posix()
+        )
+    except ValueError:
+        return str(file_path.resolve())
 
 def generate_preview(pdf_data):
     pdf_buffer = BytesIO()
@@ -378,6 +403,7 @@ def show_rfq_form():
 
     submit_col, download_col, email_col, _ = st.columns([.4, .4, 2, 1])
     send_results = st.container()
+    st.session_state.new_rfq_id = None
 
     with submit_col:
         submitted = st.button(
@@ -391,13 +417,16 @@ def show_rfq_form():
         pdf_data = build_rfq_pdf_data()
         rfq_data = build_rfq_data()
 
-        pdf_path = f"data/rfqs/{pdf_data['rfq_id']}.pdf"
-        generate_rfq_pdf(pdf_data, pdf_path)
+        pdf_path = get_rfq_pdf_path(pdf_data["rfq_id"])
 
-        with open(pdf_path, "rb") as pdf_file:
-            st.session_state.submitted_pdf = pdf_file.read()
+        with open(pdf_path, "wb") as pdf_file:
+            generate_rfq_pdf(pdf_data, pdf_file)
 
-        add_rfq(rfq_data, pdf_path)
+        st.session_state.submitted_pdf = pdf_path.read_bytes()
+
+        stored_path = get_stored_document_path(pdf_path)
+
+        st.session_state.new_rfq_id = add_rfq(rfq_data, stored_path)
 
         st.session_state.submitted_rfq_id = pdf_data["rfq_id"]
         st.session_state.rfq_submitted = True
@@ -446,6 +475,21 @@ def show_rfq_form():
                                     "vendor": vendor["vendor_name"],
                                     "error": str(e)
                                 })
+
+                    # Update RFQ status if at least one email was successfully sent
+                    if sent_vendors:
+                        try:
+                            db.execute(
+                                """
+                                UPDATE rfqs
+                                SET status = 'open'
+                                WHERE id = ?
+                                """,
+                                (st.session_state.new_rfq_id,)
+                            )
+
+                        except Exception as e:
+                            st.error(f"Emails were sent, but RFQ status could not be updated: {e}")
 
                     # Store results after sending is complete
                     st.session_state.send_results = {
@@ -593,7 +637,11 @@ with vendors_col:
                 st.session_state.vendor_limit += PAGE_SIZE
                 st.rerun()
 
-    add_col, rfq_col, deselect_col, spacer = st.columns([1, 1.5, 1, 4])
+    upload_col, add_col, rfq_col, deselect_col, spacer = st.columns([1, 1, 1.5, 1, 4])
+
+    with upload_col:
+        if st.button("Upload files", use_container_width=True):
+            show_upload_dialog()
 
     with add_col:
         st.button("Add Vendor", on_click=show_vendor_form, use_container_width=True)

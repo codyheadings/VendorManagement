@@ -51,8 +51,8 @@ def add_rfq(rfq_data: dict, pdf_path: str) -> int:
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    pdf_file.name,
-                    str(pdf_file.resolve()),
+                    f"{rfq_data['rfq_id']}.pdf",
+                    pdf_path,
                     sha256,
                     "application/pdf",
                     "rfq"
