@@ -26,12 +26,35 @@ def _truncate_lists(cls, v):
     return v
 
 
+# Models sometimes write a stand-in such as "Not stated" or "null" into a number or date field
+# instead of null. That means "absent", so treat it as absent rather than failing the whole
+# document (the tokens are already spent).
+_PLACEHOLDERS = {"", "n/a", "na", "none", "null", "nil", "not stated", "not specified", "not available",
+                 "not applicable", "not provided", "unknown", "tbd", "-", "--", "\u2013", "\u2014"}
+
+
+def _scrub(obj):
+    if isinstance(obj, dict):
+        return {k: _scrub(v) for k, v in obj.items()
+                if not (isinstance(v, str) and v.strip().lower().rstrip(".") in _PLACEHOLDERS)}
+    if isinstance(obj, list):                       # lists of strings (flags) are left alone
+        return [_scrub(v) if isinstance(v, dict) else v for v in obj]
+    return obj
+
+
+class _Scrubbed(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_placeholders(cls, data):
+        return _scrub(data) if isinstance(data, dict) else data
+
+
 class FieldSource(BaseModel):
     field: str = Field(description="Name of the extracted field this snippet supports")
     snippet: str = Field(description="Short verbatim excerpt (max 150 characters) from the document")
 
 
-class LineItem(BaseModel):
+class LineItem(_Scrubbed):
     description: str = Field(description="As written in the document, in its original language")
     description_en: str | None = Field(None, description="Short English translation; null if already English")
     item_type: Literal["main", "shipping", "fee", "optional", "other"] = Field(
@@ -59,11 +82,12 @@ class LineItem(BaseModel):
         return v
 
 
-class PriceTier(BaseModel):
+class PriceTier(_Scrubbed):
     """One row of a price-break table, e.g. '500 g - 999 g: 36000 per kg'."""
-    min_quantity: float | None = None
-    max_quantity: float | None = None
-    quantity_unit: str | None = Field(None, description="Unit the quantity range is written in, e.g. g or kg")
+    min_quantity: float | None = Field(
+        None, description="Lower bound exactly as written, in quantity_unit. '>= 1 kg' -> 1 with unit kg (never 1000)")
+    max_quantity: float | None = Field(None, description="Upper bound exactly as written, in quantity_unit")
+    quantity_unit: str | None = Field(None, description="Unit the range is written in, e.g. g or kg. Never convert.")
     unit_price: float = Field(description="Price per price_unit")
     price_unit: str | None = Field(None, description="What the price is per, e.g. kg. As quoted, never converted.")
 
@@ -75,7 +99,7 @@ class PriceTier(BaseModel):
         return v
 
 
-class QuoteExtraction(BaseModel):
+class QuoteExtraction(_Scrubbed):
     source_language: str | None = Field(None, description="ISO 639-1 code of the document language, e.g. en, de, zh")
     vendor_name: str | None = None
     reference_number: str | None = Field(None, description="The vendor's own quote or reference number")
@@ -154,7 +178,7 @@ class QuoteExtraction(BaseModel):
         return self
 
 
-class LegalDocExtraction(BaseModel):
+class LegalDocExtraction(_Scrubbed):
     source_language: str | None = Field(None, description="ISO 639-1 code of the document language")
     doc_type: Literal["NDA", "MSA", "SOW", "OTHER"]
     other_type_description: str | None = Field(None, description="If OTHER, what it is, e.g. certificate of insurance")
@@ -199,7 +223,7 @@ class LegalDocExtraction(BaseModel):
         return self
 
 
-class EmailExtraction(BaseModel):
+class EmailExtraction(_Scrubbed):
     kind: Literal["quote", "question", "decline", "revision", "notice", "other"] = Field(
         description="quote: price given in the email; question: vendor asks us something; decline: vendor "
         "will not quote; revision: updated version of an earlier quote; notice: administrative or legal notice"

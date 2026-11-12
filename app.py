@@ -17,7 +17,7 @@ pages = {
     ],
     "Resources": [
         st.Page("pages/quotes.py", title="View Quotes", icon=":material/document_search:"),
-        st.Page("pages/documents.py", title="View Documents", icon=":material/folder_open:"),
+        st.Page("pages/documents.py", title="Other Documents", icon=":material/folder_open:"),
     ],
 }
 

@@ -1,12 +1,4 @@
 """Historical exchange rates from exchangeratesapi.io, cached on disk.
-
-Design goals
-  * Spend at most ONE API call per rates date (the free tier allows 100/month).
-    The response is saved under data/fixtures/ and every later run reads that
-    file instead. Commit the file to git so a redeploy never calls the API.
-  * Never crash seeding: on any failure, load_rates() returns (None, reason)
-    and the caller falls back to mock rates.
-  * Never leak the API key into logs, reports or error messages.
 """
 import json
 import os
@@ -17,7 +9,6 @@ import requests
 
 import db
 
-# If your plan only serves plain HTTP, change this to "http://..."
 API_URL = "https://api.exchangeratesapi.io/v1/{date}"
 SYMBOLS = ["USD", "GBP", "INR", "CNY", "CHF", "JPY", "CAD", "AUD"]
 CACHE_DIR = db.BASE_DIR / "data" / "fixtures"
@@ -113,7 +104,7 @@ def _write_cache(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp.replace(path)  # atomic: a crash never leaves a half-written cache file
+    tmp.replace(path)
 
 
 def load_rates(date: str, allow_network: bool = False) -> tuple[dict[str, float] | None, str]:

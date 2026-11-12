@@ -2,8 +2,13 @@ import streamlit as st
 from pathlib import Path
 import db
 
+st.set_page_config(
+    page_title="Quotes",
+    layout="wide"
+)
+
 # Main page content
-DOCS_DIR = (db.BASE_DIR / "data" / "documents").resolve()  # only files under here can be opened
+DOCS_DIR = (db.BASE_DIR / "data" ).resolve()  # only files under here can be opened
 IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
 REVIEW_COLORS = {"pending": "orange", "approved": "green", "rejected": "red"}
 COL_WIDTHS = [2.5, 2, 2.5, 1.5, 2, 1.7, 1.5]
@@ -27,7 +32,7 @@ def show_source(file_name: str, file_path: str, mime_type: str | None):
         path = db.BASE_DIR / path
     path = path.resolve()
 
-    # Never serve anything outside the documents folder (path traversal guard)
+    # Never serve anything outside the data folder
     if not path.is_relative_to(DOCS_DIR):
         st.error("This file is outside the allowed documents folder.")
         return
@@ -39,7 +44,7 @@ def show_source(file_name: str, file_path: str, mime_type: str | None):
     suffix = path.suffix.lower()
     try:
         if suffix == ".pdf":
-            st.pdf(str(path))
+            st.pdf(str(path), height=600)
         elif suffix in IMAGE_TYPES:
             st.image(str(path))
         elif suffix in {".eml", ".txt"}:

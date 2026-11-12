@@ -31,7 +31,7 @@ from schemas import EmailExtraction, LegalDocExtraction, QuoteExtraction
 
 # Using Haiku for cheap development, can be swapped for Sonnet if a more powerful solution is needed
 MODEL = "claude-haiku-5-5"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 MAX_INPUT_TOKENS = 20_000
 MAX_OUTPUT_TOKENS = 2_048
 
@@ -70,8 +70,7 @@ Call the provided tool exactly once."""
 def compact_schema(node):
     """Strip pydantic boilerplate the model does not need, to shrink the tool definition.
 
-    Removes "title" and "default" keywords and collapses the optional-field pattern
-    anyOf: [X, {"type": "null"}] to X (an omitted field is read as null by the validation step).
+    Removes the "title" and "default" keywords.
     Property and definition NAMES are always kept, even a field that happens to be called "title".
     """
     if isinstance(node, list):
@@ -86,14 +85,6 @@ def compact_schema(node):
             continue
         else:
             out[key] = compact_schema(value)
-    branches = out.get("anyOf")
-    if branches:
-        kept = [b for b in branches if b != {"type": "null"}]
-        if len(kept) == 1:
-            rest = {k: v for k, v in out.items() if k != "anyOf"}
-            out = {**rest, **kept[0]}
-        elif len(kept) != len(branches):
-            out["anyOf"] = kept
     return out
 
 
@@ -125,7 +116,7 @@ SKIP_TYPES = {
 
 
 class SetupError(Exception):
-    """Missing key or SDK."""
+    """Missing key or SDK. The message is safe to show."""
 
 
 class AbortRun(Exception):
@@ -232,9 +223,9 @@ _NUMERIC_DATE = re.compile(r"(?<![\d./-])(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?![
 
 
 def date_order_hint(text: str) -> str:
-    """Work out, for free, whether numeric dates in the text are day-first or month-first.
+    """Determine whether numeric dates in the text are day-first or month-first.
 
-    A number above 12 in the first slot can only be a day (15.11.2024); above 12 in the
+    A number above 12 in the first slot can only be a day. Above 12 in the
     second slot can only be a day in a month-first date. Returns "" when it can't be told.
     """
     matches = _NUMERIC_DATE.findall(text)
@@ -341,6 +332,17 @@ class Result:
         return self
 
 
+def _describe_error(err: dict) -> str:
+    """One validation error as text, including the offending value so it can be diagnosed."""
+    where = ".".join(str(x) for x in err["loc"]) or "(whole document)"
+    got = err.get("input")
+    shown = ""
+    if isinstance(got, (str, int, float, bool)):
+        text = str(got)
+        shown = f" (got {(text if len(text) <= 60 else text[:57] + '...')!r})"
+    return f"{where}: {err['msg']}{shown}"
+
+
 def process_file(path: Path, ctx: RunContext) -> Result:
     res = Result(path=path)
 
@@ -407,7 +409,7 @@ def process_file(path: Path, ctx: RunContext) -> Result:
             data, status, errors = cfg.schema.model_validate(raw).model_dump(), "ok", []
         except ValidationError as e:
             status, data = "invalid", raw
-            errors = [f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()]
+            errors = [_describe_error(err) for err in e.errors()]
 
     # Cache invalid results too: the tokens are already spent, and a reviewer can fix them.
     _write_cache(path, key, {
