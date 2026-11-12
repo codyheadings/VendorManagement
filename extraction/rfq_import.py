@@ -16,8 +16,8 @@ from datetime import datetime
 from pathlib import Path
 import pdfplumber
 import db
-import extract
-import loader
+import extraction.extract as extract
+import extraction.loader as loader
 
 _NUMBER_RE = re.compile(r"RFQ-\d{4}-\d{3,4}")
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")

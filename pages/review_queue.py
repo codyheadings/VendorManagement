@@ -1,5 +1,5 @@
 import streamlit as st
-import readers
+import extraction.readers as readers
 import services.review_service as rv
 
 st.set_page_config(page_title="Review Queue", layout="wide")

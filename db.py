@@ -104,7 +104,7 @@ def ensure_db() -> None:
     if is_initialized():
         return
     init_db()
-    import seed
+    import extraction.seed as seed
     seed.run()
 
 

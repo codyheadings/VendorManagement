@@ -16,8 +16,8 @@ from datetime import date
 from pathlib import Path
 
 import db
-import loader
-import normalize
+import extraction.loader as loader
+import extraction.normalize as normalize
 
 LEGAL_STATUSES = ("draft", "sent", "signed", "expired", "terminated", "unknown")
 

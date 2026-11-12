@@ -539,3 +539,52 @@ def update_vendor_contact(
             ) from e
 
         raise ValueError(f"Could not update contact: {msg}") from e
+
+
+def update_vendor(
+    vendor_id: int,
+    name: str,
+    category: str = "",
+    country: str = "",
+    status: str = "active",
+    notes: str = "",
+):
+    """Update vendor information."""
+
+    try:
+        with db.transaction() as conn:
+            result = conn.execute(
+                """
+                UPDATE vendors
+                SET
+                    name = ?,
+                    normalized_name = ?,
+                    category = ?,
+                    country = ?,
+                    status = ?,
+                    notes = ?
+                WHERE id = ?
+                """,
+                (
+                    name.strip(),
+                    normalize_vendor_name(name),
+                    category.strip() or None,
+                    normalize_country(country) or None,
+                    status,
+                    notes.strip() or None,
+                    vendor_id,
+                ),
+            )
+
+            if result.rowcount == 0:
+                raise ValueError("Vendor no longer exists.")
+            
+    except sqlite3.IntegrityError as e:
+        msg = str(e)
+
+        if "vendors.normalized_name" in msg:
+            raise ValueError(
+                f"A vendor named '{name}' already exists."
+            ) from e
+
+        raise ValueError(f"Could not update vendor: {msg}") from e

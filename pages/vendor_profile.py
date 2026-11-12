@@ -1,10 +1,8 @@
-from pathlib import Path
 from services.document_service import *
 import streamlit as st
-import pandas as pd
 import db
-import sqlite3
 from services.vendor_service import *
+from st_helpers.vendor_profile_dialogs import *
 from util import fmt_price
 from services.purchasing_service import vendor_summary
 
@@ -18,130 +16,6 @@ REVIEW_COLORS = {
     "approved": "green",
     "rejected": "red",
 }
-
-
-def update_vendor(
-    vendor_id: int,
-    name: str,
-    category: str = "",
-    country: str = "",
-    status: str = "active",
-    notes: str = "",
-):
-    """Update vendor information."""
-
-    try:
-        with db.transaction() as conn:
-            result = conn.execute(
-                """
-                UPDATE vendors
-                SET
-                    name = ?,
-                    normalized_name = ?,
-                    category = ?,
-                    country = ?,
-                    status = ?,
-                    notes = ?
-                WHERE id = ?
-                """,
-                (
-                    name.strip(),
-                    normalize_vendor_name(name),
-                    category.strip() or None,
-                    normalize_country(country) or None,
-                    status,
-                    notes.strip() or None,
-                    vendor_id,
-                ),
-            )
-
-            if result.rowcount == 0:
-                raise ValueError("Vendor no longer exists.")
-
-        st.session_state["refresh_insights"] = True
-
-    except sqlite3.IntegrityError as e:
-        msg = str(e)
-
-        if "vendors.normalized_name" in msg:
-            raise ValueError(
-                f"A vendor named '{name}' already exists."
-            ) from e
-
-        raise ValueError(f"Could not update vendor: {msg}") from e
-
-
-@st.dialog("Edit Vendor")
-def edit_vendor_dialog(vendor):
-
-    st.caption("Update the vendor's information.")
-
-    statuses = ["active", "inactive", "blocked"]
-
-    with st.form("edit_vendor_form"):
-
-        name = st.text_input(
-            "Vendor Name *",
-            value=vendor["name"] or "",
-        )
-
-        category = st.text_input(
-            "Category",
-            value=vendor["category"] or "",
-            placeholder="e.g. Analytical testing",
-        )
-
-        country = st.text_input(
-            "Country",
-            value=vendor["country"] or "",
-            placeholder="e.g. Germany",
-        )
-
-        status = st.selectbox(
-            "Status",
-            statuses,
-            index=(
-                statuses.index(vendor["status"])
-                if vendor["status"] in statuses
-                else 0
-            ),
-            format_func=lambda x: x.capitalize(),
-        )
-
-        notes = st.text_area(
-            "Notes",
-            value=vendor["notes"] or "",
-            placeholder="Additional information about this vendor...",
-            height=150,
-        )
-
-        submitted = st.form_submit_button(
-            "Save Changes",
-            type="primary",
-            use_container_width=True,
-        )
-
-        if submitted:
-
-            if not name.strip():
-                st.error("Please enter a vendor name.")
-
-            else:
-                try:
-                    update_vendor(
-                        vendor_id=vendor["id"],
-                        name=name,
-                        category=category,
-                        country=country,
-                        status=status,
-                        notes=notes,
-                    )
-
-                    st.success("Vendor updated successfully!")
-                    st.rerun()
-
-                except ValueError as e:
-                    st.error(str(e))
 
 vendor_id = st.session_state.get("selected_vendor_id")
 
@@ -176,11 +50,7 @@ with action_col:
     else:
         st.error(f"● {status}")
 
-    if st.button(
-        "Edit Vendor",
-        icon=":material/edit:",
-        use_container_width=True,
-    ):
+    if st.button("Edit Vendor", icon=":material/edit:", use_container_width=True,):
         edit_vendor_dialog(vendor)
 
 st.divider()
@@ -208,163 +78,6 @@ with col4:
     )
 
 st.divider()
-
-@st.dialog("Add Vendor Contact")
-def add_contact_dialog(vendor_id):
-    st.caption("Add a new contact for this vendor.")
-
-    with st.form("add_vendor_contact_form", clear_on_submit=True):
-        name = st.text_input(
-            "Full Name *",
-            placeholder="e.g. Anna Müller",
-        )
-
-        email = st.text_input(
-            "Email Address",
-            placeholder="anna@example.com",
-        )
-
-        phone = st.text_input(
-            "Phone Number",
-            placeholder="+49 30 12345678",
-        )
-
-        role = st.text_input(
-            "Job Title / Role",
-            placeholder="e.g. Sales Representative",
-        )
-
-        is_primary = st.checkbox(
-            "Set as primary contact",
-            value=False,
-        )
-
-        submitted = st.form_submit_button(
-            "Save Contact",
-            type="primary",
-            use_container_width=True,
-        )
-
-        if submitted:
-            if not name.strip():
-                st.error("Please enter the contact's name.")
-
-            else:
-                try:
-                    add_vendor_contact(
-                        vendor_id=vendor_id,
-                        name=name,
-                        email=email,
-                        phone=phone,
-                        role=role,
-                        is_primary=is_primary,
-                    )
-
-                    st.success("Contact added successfully!")
-                    st.rerun()
-
-                except ValueError as e:
-                    st.error(str(e))
-
-
-@st.dialog("Delete Contact")
-def delete_contact_dialog(vendor_id, contact_id, contact_name):
-    st.warning(
-        f"Are you sure you want to delete {contact_name}?"
-    )
-
-    st.caption("This action cannot be undone.")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button(
-            "Cancel",
-            use_container_width=True,
-        ):
-            st.rerun()
-
-    with col2:
-        if st.button(
-            "Delete Contact",
-            type="primary",
-            use_container_width=True,
-            icon=":material/delete:",
-        ):
-            try:
-                delete_vendor_contact(
-                    vendor_id,
-                    contact_id,
-                )
-
-                st.success("Contact deleted successfully.")
-                st.rerun()
-
-            except ValueError as e:
-                st.error(str(e))
-
-
-@st.dialog("Edit Vendor Contact")
-def edit_contact_dialog(vendor_id, contact):
-    st.caption("Update the vendor contact information.")
-
-    with st.form(
-        f"edit_vendor_contact_{contact['id']}",
-        clear_on_submit=False,
-    ):
-
-        name = st.text_input(
-            "Full Name *",
-            value=contact["name"] or "",
-        )
-
-        email = st.text_input(
-            "Email Address",
-            value=contact["email"] or "",
-        )
-
-        phone = st.text_input(
-            "Phone Number",
-            value=contact["phone"] or "",
-        )
-
-        role = st.text_input(
-            "Job Title / Role",
-            value=contact["role"] or "",
-        )
-
-        is_primary = st.checkbox(
-            "Set as primary contact",
-            value=bool(contact["is_primary"]),
-        )
-
-        submitted = st.form_submit_button(
-            "Save Changes",
-            type="primary",
-            use_container_width=True,
-        )
-
-        if submitted:
-            if not name.strip():
-                st.error("Please enter the contact's name.")
-
-            else:
-                try:
-                    update_vendor_contact(
-                        vendor_id=vendor_id,
-                        contact_id=contact["id"],
-                        name=name,
-                        email=email,
-                        phone=phone,
-                        role=role,
-                        is_primary=is_primary,
-                    )
-
-                    st.success("Contact updated successfully!")
-                    st.rerun()
-
-                except ValueError as e:
-                    st.error(str(e))
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "Overview",
@@ -410,7 +123,6 @@ with tab1:
 
 # Quotes
 def render_vendor_quotes(quotes, key_prefix="vendor"):
-
     col_widths = [1.8, 2.2, 1.3, 1.2, 1.5, 1.5, 1.5]
 
     headers = st.columns(col_widths)
@@ -429,13 +141,11 @@ def render_vendor_quotes(quotes, key_prefix="vendor"):
         col.caption(f"**{label}**")
 
     with st.container(height=520, border=True):
-
         if not quotes:
             st.info("No quotes found for this vendor.")
             return
 
         for q in quotes:
-
             with st.container(
                 border=True,
                 key=f"vendor_quote_{key_prefix}_{q['id']}"

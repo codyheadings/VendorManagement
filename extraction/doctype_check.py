@@ -1,6 +1,6 @@
 """Cheap, local check that an upload is the kind of document the person said it is.
 
-Runs BEFORE any AI call and costs nothing. It only ever warns; the person can still go ahead.
+Runs BEFORE any AI call. It only ever warns; the person can still go ahead.
 
 How it avoids false alarms
   * A quote that says "NDA required" or "confidentiality agreement" in its requirements must not be
@@ -14,7 +14,7 @@ How it avoids false alarms
 import re
 from dataclasses import dataclass
 
-import readers
+import extraction.readers as readers
 
 TITLE_LINES = 5                    # how many of the first non-empty lines count as the title area
 TITLE_LINE_MAX = 80                # ...and only lines this short (a heading, not a sentence)

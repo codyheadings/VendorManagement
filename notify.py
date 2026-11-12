@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 import db
-import loader
+import extraction.loader as loader
 
 MAX_LINES = 10                    # lines per message; the rest become "and N more"
 RENEWAL_WARNING_DAYS = 60

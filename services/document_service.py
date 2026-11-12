@@ -1,7 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import db
-import readers
+import extraction.readers as readers
 
 DOCS_DIR = (db.BASE_DIR / "data").resolve()
 

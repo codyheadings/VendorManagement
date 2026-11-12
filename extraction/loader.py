@@ -33,8 +33,8 @@ from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
 import db
-import extract
-import normalize
+import extraction.extract as extract
+import extraction.normalize as normalize
 from services.rfq_service import log_message
 from services.vendor_service import normalize_vendor_name
 
@@ -617,7 +617,7 @@ def ingest(path: Path, ctx: extract.RunContext) -> Outcome:
         return Outcome(path, "dry-run", res.message, notes=res.notes)
     if res.status == "skipped":
         if res.doc_type == "rfq":               # our own RFQs: parsed by rule, no AI
-            import rfq_import
+            import extraction.rfq_import as rfq_import
             return rfq_import.import_rfq(path)
         return Outcome(path, "skipped", res.message)
     if res.status == "error":

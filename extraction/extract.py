@@ -26,8 +26,8 @@ from pathlib import Path
 from pydantic import BaseModel, ValidationError
 
 import db
-import readers
-from schemas import EmailExtraction, InvoiceExtraction, LegalDocExtraction, QuoteExtraction
+import extraction.readers as readers
+from extraction.schemas import EmailExtraction, InvoiceExtraction, LegalDocExtraction, QuoteExtraction
 
 # Using Haiku for cheap development, can be swapped for Sonnet if a more powerful solution is needed
 MODEL = "claude-haiku-5-5"

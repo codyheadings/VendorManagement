@@ -2,7 +2,7 @@ from datetime import date
 import streamlit as st
 import db
 import services.purchasing_service as ps
-from po_dialog import show_create_po_dialog
+from st_helpers.po_dialog import show_create_po_dialog
 
 st.set_page_config(page_title="Purchasing", layout="wide")
 st.title("Purchasing")

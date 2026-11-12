@@ -13,13 +13,13 @@ import tempfile
 from email.message import EmailMessage
 from dataclasses import dataclass, field
 from pathlib import Path
-import doctype_check
+import extraction.doctype_check as doctype_check
 import db
-import extract
-import loader
-import readers
-import rfq_import
-import seed
+import extraction.extract as extract
+import extraction.loader as loader
+import extraction.readers as readers
+import extraction.rfq_import as rfq_import
+import extraction.seed as seed
 
 MAX_BYTES = 15 * 1024 * 1024
 UPLOAD_KINDS = {
