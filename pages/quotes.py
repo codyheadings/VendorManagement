@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import db
+from util import fmt_price
 
 st.set_page_config(
     page_title="Quotes",
@@ -12,18 +13,6 @@ DOCS_DIR = (db.BASE_DIR / "data" ).resolve()  # only files under here can be ope
 IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
 REVIEW_COLORS = {"pending": "orange", "approved": "green", "rejected": "red"}
 COL_WIDTHS = [2.5, 2, 2.5, 1.5, 2, 1.7, 1.5]
-
-
-def fmt_price(amount, currency, rate_to_usd):
-    """Return (main_line, caption). Converted to USD when we have a rate."""
-    if amount is None:
-        return "—", "Total not stated"
-    if currency == "USD":
-        return f"${amount:,.2f}", ""
-    if rate_to_usd:
-        return f"${amount * rate_to_usd:,.2f}", f"converted from {amount:,.2f} {currency}"
-    return f"{amount:,.2f} {currency}", "no exchange rate on file"
-
 
 @st.dialog("Source document", width="large")
 def show_source(file_name: str, file_path: str, mime_type: str | None):
@@ -120,7 +109,7 @@ for col, label in zip(
 ):
     col.caption(f"**{label.upper()}**")
 
-with st.container(height=520, border=True):
+with st.container(height=540, border=True):
     if not quotes:
         st.info("No quotes match these filters.")
 

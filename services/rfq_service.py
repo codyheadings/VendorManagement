@@ -77,7 +77,7 @@ def add_rfq(rfq_data: dict, pdf_path: str) -> int:
                 (
                     rfq_number,
                     document_id,
-                    rfq_data["rfq_purpose"].strip(),
+                    rfq_data["rfq_subtitle"].strip(),
                     rfq_data["rfq_contact"].strip(),
                     rfq_data["deliver_to"].strip(),
                     rfq_data["issued_date"].isoformat(),

@@ -2,6 +2,19 @@
 import streamlit as st
 import db
 
+# remove excess whitespace at top of page
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 3rem;
+            padding-bottom: 1rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 @st.cache_resource
 def _setup():
     db.ensure_db()
@@ -12,7 +25,6 @@ _setup()
 pages = {
     "": [
         st.Page("pages/vendors.py", title="Dashboard", icon=":material/analytics:", default=True),
-        # st.Page("pages/request_quotes.py", title="Request Quotes", icon=":material/request_quote:"),
         st.Page("pages/vendor_profile.py", title="Vendor Profile", icon=":material/business:", visibility="hidden"),
     ],
     "Resources": [

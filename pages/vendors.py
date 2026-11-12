@@ -3,10 +3,12 @@ import sqlite3
 import streamlit as st
 import db
 from services.email_service import build_rfq_email, send_rfq_email
-from services.vendor_service import normalize_vendor_name
 from services.rfq_service import add_rfq, get_next_rfq_number
 from io import BytesIO
 from services.rfq_pdf_service import generate_rfq_pdf
+from services.vendor_service import add_vendor_with_contact
+from services.vendor_service import get_vendor_primary_contact
+from services.vendor_service import get_vendor_from_id
 
 st.set_page_config(
     page_title="Dashboard",
@@ -426,7 +428,6 @@ def show_rfq_form():
 
                     with st.spinner("Sending RFQ emails to selected vendors..."):
                         for vendor_id in st.session_state.selected_vendor_ids:
-
                             vendor = get_vendor_primary_contact(vendor_id)
 
                             if not vendor or not vendor["contact_name"] or not vendor["email"]:
@@ -461,7 +462,6 @@ def show_rfq_form():
             st.subheader("Email Sending Results")
 
             with st.container(height=250, border=True):
-
                 if results["sent"]:
                     st.success(
                         f"Successfully sent to {len(results['sent'])} vendor(s)."
@@ -490,33 +490,6 @@ def show_rfq_form():
                 if not any(results.values()):
                     st.info("No vendors were selected.")
 
-def get_vendor_from_id(vendor_id: int) -> str:
-    result = db.query_one(
-        "SELECT name FROM vendors WHERE id = ?",
-        (vendor_id,)
-    )
-    return result["name"]
-
-def get_vendor_primary_contact(vendor_id: int) -> dict:
-    """Retrieve vendor information and its primary contact."""
-
-    return db.query_one(
-        """
-        SELECT
-            v.id AS vendor_id,
-            v.name AS vendor_name,
-            c.name AS contact_name,
-            c.email AS email,
-            c.role AS contact_role
-        FROM vendors v
-        LEFT JOIN vendor_contacts c
-            ON c.vendor_id = v.id
-            AND c.is_primary = 1
-        WHERE v.id = ?
-        """,
-        (vendor_id,)
-    )
-
 def update_vendor_selection(vendor_id):
     checkbox_key = f"select_vendor_{vendor_id}"
 
@@ -540,7 +513,7 @@ if "selected_vendor_ids" not in st.session_state:
 vendors_col, insights_col = st.columns([2, 1], gap="large")
 
 with vendors_col:
-    STATUS_COLORS = {"active": "green", "inactive": "gray", "blocked": "red"}
+    STATUS_COLORS = {"active": "green", "inactive": "yellow", "blocked": "red"}
     COL_WIDTHS = [0.4, 3, 2, 2, 3, 1.5]
 
     PAGE_SIZE = 20
@@ -576,7 +549,7 @@ with vendors_col:
         if label:
             col.caption(f"**{label.upper()}**")
 
-    with st.container(height=480, border=True):
+    with st.container(height=540, border=True):
         for v in vendors:
             checkbox_key = f"select_vendor_{v['id']}"
 
@@ -596,7 +569,6 @@ with vendors_col:
                     on_change=update_vendor_selection,
                     args=(v["id"],),
                 )
-
 
                 if cols[1].button(v["name"], key=f"vendor_{v['id']}", type="tertiary"):
                     st.session_state["selected_vendor_id"] = v["id"]
@@ -644,7 +616,7 @@ with insights_col:
     with st.container(horizontal_alignment="center", height="stretch"):
         st.subheader("Insights")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             total_vendors = db.scalar("SELECT COUNT(*) FROM vendors")
             st.metric("Total Vendors", total_vendors)
@@ -652,6 +624,10 @@ with insights_col:
         with col2:
             active_vendors = db.scalar("SELECT COUNT(*) FROM vendors WHERE status LIKE 'active'")
             st.metric("Active Vendors", active_vendors)
+
+        with col3:
+            vendor_countries = db.scalar("SELECT COUNT(DISTINCT country) FROM vendors")
+            st.metric("Countries", vendor_countries)
             
         st.divider()
         st.metric(
@@ -665,59 +641,3 @@ with insights_col:
             db.scalar("SELECT COUNT(*) FROM quotes WHERE review_status = 'pending'"),
         )
         st.divider()
-
-# Helpers
-def add_vendor(name: str, country: str, category: str) -> int:
-    normalized_name = normalize_vendor_name(name)
-    
-    try:
-        inserted = db.execute(
-            """
-            INSERT INTO vendors (name, normalized_name, category, country)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                name.strip(),
-                normalized_name,
-                category.strip(),
-                country.strip()
-            )
-        )
-        return inserted
-
-    except sqlite3.IntegrityError as e:
-            msg = str(e)
-            if "vendors.normalized_name" in msg:
-                raise ValueError(f"A vendor named '{name}' already exists.") from e
-            raise ValueError(f"Could not add vendor: {msg}") from e
-
-def add_vendor_with_contact(
-    name: str, category: str, country: str,
-    contact_name: str, email: str, role: str,
-) -> int:
-    """Insert a vendor and its primary contact atomically. Returns the vendor id."""
-    try:
-        with db.transaction() as conn:
-            vendor_id = conn.execute(
-                """
-                INSERT INTO vendors (name, normalized_name, category, country)
-                VALUES (?, ?, ?, ?)
-                """,
-                (name.strip(), normalize_vendor_name(name), category.strip(), country.strip()),
-            ).lastrowid
-
-            conn.execute(
-                """
-                INSERT INTO vendor_contacts (vendor_id, name, email, role, is_primary)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                (vendor_id, contact_name.strip(), email.strip(), role.strip()),
-            )
-            return vendor_id
-    except sqlite3.IntegrityError as e:
-        msg = str(e)
-        if "vendors.normalized_name" in msg:
-            raise ValueError(f"A vendor named '{name}' already exists.") from e
-        if "CHECK constraint failed" in msg and "email" in msg:
-            raise ValueError("The submitted email address is incorrectly formatted.") from e
-        raise ValueError(f"Could not save: {msg}") from e

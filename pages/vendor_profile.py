@@ -4,6 +4,8 @@ import streamlit as st
 import pandas as pd
 import db
 import sqlite3
+from services.vendor_service import *
+from util import fmt_price
 
 st.set_page_config(
     page_title="Vendor Profile",
@@ -17,25 +19,127 @@ REVIEW_COLORS = {
 }
 
 
-def fmt_price(amount, currency, rate_to_usd):
-    """Format quote price, converting to USD when possible."""
+def update_vendor(
+    vendor_id: int,
+    name: str,
+    category: str = "",
+    country: str = "",
+    status: str = "active",
+    notes: str = "",
+):
+    """Update vendor information."""
 
-    if amount is None:
-        return "—", "Total not stated"
+    try:
+        with db.transaction() as conn:
 
-    if currency == "USD":
-        return f"${amount:,.2f}", ""
+            result = conn.execute(
+                """
+                UPDATE vendors
+                SET
+                    name = ?,
+                    normalized_name = ?,
+                    category = ?,
+                    country = ?,
+                    status = ?,
+                    notes = ?
+                WHERE id = ?
+                """,
+                (
+                    name.strip(),
+                    normalize_vendor_name(name),
+                    category.strip() or None,
+                    normalize_country(country) or None,
+                    status,
+                    notes.strip() or None,
+                    vendor_id,
+                ),
+            )
 
-    if rate_to_usd:
-        return (
-            f"${amount * rate_to_usd:,.2f}",
-            f"converted from {amount:,.2f} {currency}"
+            if result.rowcount == 0:
+                raise ValueError("Vendor no longer exists.")
+
+    except sqlite3.IntegrityError as e:
+        msg = str(e)
+
+        if "vendors.normalized_name" in msg:
+            raise ValueError(
+                f"A vendor named '{name}' already exists."
+            ) from e
+
+        raise ValueError(f"Could not update vendor: {msg}") from e
+
+
+@st.dialog("Edit Vendor")
+def edit_vendor_dialog(vendor):
+
+    st.caption("Update the vendor's information.")
+
+    statuses = ["active", "inactive", "blocked"]
+
+    with st.form("edit_vendor_form"):
+
+        name = st.text_input(
+            "Vendor Name *",
+            value=vendor["name"] or "",
         )
 
-    return (
-        f"{amount:,.2f} {currency}",
-        "no exchange rate on file"
-    )
+        category = st.text_input(
+            "Category",
+            value=vendor["category"] or "",
+            placeholder="e.g. Analytical testing",
+        )
+
+        country = st.text_input(
+            "Country",
+            value=vendor["country"] or "",
+            placeholder="e.g. Germany",
+        )
+
+        status = st.selectbox(
+            "Status",
+            statuses,
+            index=(
+                statuses.index(vendor["status"])
+                if vendor["status"] in statuses
+                else 0
+            ),
+            format_func=lambda x: x.capitalize(),
+        )
+
+        notes = st.text_area(
+            "Notes",
+            value=vendor["notes"] or "",
+            placeholder="Additional information about this vendor...",
+            height=150,
+        )
+
+        submitted = st.form_submit_button(
+            "Save Changes",
+            type="primary",
+            use_container_width=True,
+        )
+
+        if submitted:
+
+            if not name.strip():
+                st.error("Please enter a vendor name.")
+
+            else:
+                try:
+                    update_vendor(
+                        vendor_id=vendor["id"],
+                        name=name,
+                        category=category,
+                        country=country,
+                        status=status,
+                        notes=notes,
+                    )
+
+                    st.success("Vendor updated successfully!")
+                    st.rerun()
+
+                except ValueError as e:
+                    st.error(str(e))
 
 vendor_id = st.session_state.get("selected_vendor_id")
 
@@ -52,23 +156,35 @@ if vendor is None:
     st.error("That vendor no longer exists.")
     st.stop()
 
-header_col, status_col = st.columns([5, .35])
+header_col, _, action_col = st.columns([3, 3.5, 1])
 
 with header_col:
     st.title(vendor["name"])
     st.caption("Vendor Profile")
-with status_col:
+
+with action_col:
     status = (vendor["status"] or "unknown").capitalize()
+        
     if status == "Active":
         st.success(f"● {status}")
-    else:
+
+    elif status == "Inactive":
         st.warning(f"● {status}")
+
+    else:
+        st.error(f"● {status}")
+
+    if st.button(
+        "Edit Vendor",
+        icon=":material/edit:",
+        use_container_width=True,
+    ):
+        edit_vendor_dialog(vendor)
 
 st.divider()
 
 # Key Information
-
-col1, col2, col3 = st.columns(3)
+col1, col2, _ = st.columns([1,1,2])
 
 with col1:
     st.metric(
@@ -82,21 +198,13 @@ with col2:
         value=vendor["country"] or "Not specified"
     )
 
-with col3:
-    st.metric(
-        label="Vendor Status",
-        value=status
-    )
-
 st.divider()
 
 @st.dialog("Add Vendor Contact")
 def add_contact_dialog(vendor_id):
-
     st.caption("Add a new contact for this vendor.")
 
     with st.form("add_vendor_contact_form", clear_on_submit=True):
-
         name = st.text_input(
             "Full Name *",
             placeholder="e.g. Anna Müller",
@@ -129,7 +237,6 @@ def add_contact_dialog(vendor_id):
         )
 
         if submitted:
-
             if not name.strip():
                 st.error("Please enter the contact's name.")
 
@@ -153,7 +260,6 @@ def add_contact_dialog(vendor_id):
 
 @st.dialog("Delete Contact")
 def delete_contact_dialog(vendor_id, contact_id, contact_name):
-
     st.warning(
         f"Are you sure you want to delete {contact_name}?"
     )
@@ -191,7 +297,6 @@ def delete_contact_dialog(vendor_id, contact_id, contact_name):
 
 @st.dialog("Edit Vendor Contact")
 def edit_contact_dialog(vendor_id, contact):
-
     st.caption("Update the vendor contact information.")
 
     with st.form(
@@ -231,7 +336,6 @@ def edit_contact_dialog(vendor_id, contact):
         )
 
         if submitted:
-
             if not name.strip():
                 st.error("Please enter the contact's name.")
 
@@ -261,9 +365,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # Overview
-
 with tab1:
-
     st.subheader("Vendor Information")
 
     info_col1, info_col2 = st.columns(2)
@@ -298,92 +400,6 @@ with tab1:
         st.caption("No notes have been added for this vendor.")
 
 # Quotes
-
-def get_vendor_quotes(vendor_id, search="", status_filter="All",
-                      sort="Date", order="Descending"):
-
-    like = f"%{search.strip()}%"
-    status = status_filter.lower()
-
-    sort_columns = {
-        "Date": "q.quote_date",
-        "Price": "q.total_amount",
-        "Delivery": "q.delivery_time_days",
-    }
-
-    sort_by = sort_columns[sort]
-    order_by = "DESC" if order == "Descending" else "ASC"
-
-    return db.query(
-        f"""
-        SELECT
-            q.id,
-            q.reference_number,
-            q.quote_date,
-            q.valid_until,
-            q.currency,
-            q.total_amount,
-            q.delivery_time_days,
-            q.review_status,
-            q.confidence,
-
-            v.name AS vendor_name,
-
-            r.rfq_number,
-
-            d.file_name,
-            d.file_path,
-            d.mime_type,
-
-            er.rate_to_usd,
-
-            EXISTS (
-                SELECT 1
-                FROM quotes q2
-                WHERE q2.supersedes_quote_id = q.id
-                  AND q2.review_status = 'approved'
-            ) AS superseded
-
-        FROM quotes q
-
-        JOIN vendors v
-            ON v.id = q.vendor_id
-
-        LEFT JOIN rfqs r
-            ON r.id = q.rfq_id
-
-        LEFT JOIN documents d
-            ON d.id = q.document_id
-
-        LEFT JOIN exchange_rates er
-            ON er.currency = q.currency
-
-        WHERE q.vendor_id = ?
-
-          AND (
-              q.reference_number LIKE ?
-              OR COALESCE(r.rfq_number, '') LIKE ?
-              OR COALESCE(r.title, '') LIKE ?
-          )
-
-          AND (
-              ? = 'all'
-              OR q.review_status = ?
-          )
-
-        ORDER BY {sort_by} {order_by}, q.id DESC
-        """,
-        (
-            vendor_id,
-            like,
-            like,
-            like,
-            status,
-            status,
-        ),
-    )
-
-
 def render_vendor_quotes(quotes, key_prefix="vendor"):
 
     col_widths = [1.8, 2.2, 1.3, 1.2, 1.5, 1.5, 1.5]
@@ -614,165 +630,6 @@ with tab2:
     )
 
 # Contacts
-
-def add_vendor_contact(
-    vendor_id: int,
-    name: str,
-    email: str = "",
-    phone: str = "",
-    role: str = "",
-    is_primary: bool = False,
-):
-    """Add a vendor contact, optionally replacing the primary contact."""
-    try:
-        with db.transaction() as conn:
-            # Unset the existing primary contact if requested
-            if is_primary:
-                conn.execute(
-                    """
-                    UPDATE vendor_contacts
-                    SET is_primary = 0
-                    WHERE vendor_id = ?
-                      AND is_primary = 1
-                    """,
-                    (vendor_id,),
-                )
-
-            # Insert the new contact
-            conn.execute(
-                """
-                INSERT INTO vendor_contacts (
-                    vendor_id,
-                    name,
-                    email,
-                    phone,
-                    role,
-                    is_primary
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    vendor_id,
-                    name.strip(),
-                    email.strip() or None,
-                    phone.strip() or None,
-                    role.strip() or None,
-                    int(is_primary),
-                ),
-            )
-
-    except sqlite3.IntegrityError as e:
-        msg = str(e)
-
-        if "CHECK constraint failed" in msg and "email" in msg:
-            raise ValueError(
-                "The submitted email address is incorrectly formatted."
-            ) from e
-
-        if "UNIQUE constraint failed" in msg:
-            raise ValueError(
-                "A contact with this email already exists for this vendor."
-            ) from e
-
-        raise ValueError(f"Could not add contact: {msg}") from e
-
-
-def delete_vendor_contact(vendor_id: int, contact_id: int):
-    """Delete a non-primary vendor contact."""
-
-    try:
-        with db.transaction() as conn:
-
-            result = conn.execute(
-                """
-                DELETE FROM vendor_contacts
-                WHERE id = ?
-                  AND vendor_id = ?
-                  AND is_primary = 0
-                """,
-                (contact_id, vendor_id),
-            )
-
-            if result.rowcount == 0:
-                raise ValueError(
-                    "Contact could not be deleted. "
-                    "It may be the primary contact or it no longer exists."
-                )
-
-    except sqlite3.IntegrityError as e:
-        raise ValueError(
-            f"Could not delete contact: {e}"
-        ) from e
-
-
-def update_vendor_contact(
-    vendor_id: int,
-    contact_id: int,
-    name: str,
-    email: str = "",
-    phone: str = "",
-    role: str = "",
-    is_primary: bool = False,
-):
-    """Update a vendor contact, optionally replacing the primary contact."""
-
-    try:
-        with db.transaction() as conn:
-
-            if is_primary:
-                conn.execute(
-                    """
-                    UPDATE vendor_contacts
-                    SET is_primary = 0
-                    WHERE vendor_id = ?
-                      AND id != ?
-                      AND is_primary = 1
-                    """,
-                    (vendor_id, contact_id),
-                )
-
-            result = conn.execute(
-                """
-                UPDATE vendor_contacts
-                SET
-                    name = ?,
-                    email = ?,
-                    phone = ?,
-                    role = ?,
-                    is_primary = ?
-                WHERE id = ?
-                  AND vendor_id = ?
-                """,
-                (
-                    name.strip(),
-                    email.strip() or None,
-                    phone.strip() or None,
-                    role.strip() or None,
-                    int(is_primary),
-                    contact_id,
-                    vendor_id,
-                ),
-            )
-
-            if result.rowcount == 0:
-                raise ValueError("Contact no longer exists.")
-
-    except sqlite3.IntegrityError as e:
-        msg = str(e)
-
-        if "CHECK constraint failed" in msg and "email" in msg:
-            raise ValueError(
-                "The submitted email address is incorrectly formatted."
-            ) from e
-
-        if "UNIQUE constraint failed" in msg:
-            raise ValueError(
-                "A contact with this email already exists for this vendor."
-            ) from e
-
-        raise ValueError(f"Could not update contact: {msg}") from e
-
-
 with tab3:
     header_col, button_col = st.columns(
         [5, .5],
@@ -827,7 +684,7 @@ with tab3:
                     st.markdown(f"### {contact['name']}")
 
                     if contact["role"]:
-                        st.caption(f"role: {contact["role"]}")
+                        st.caption(f"{contact["role"]}")
                     else: 
                         st.caption("Role unknown")
 
@@ -889,7 +746,6 @@ with tab3:
 
 # Documents
 def render_vendor_documents(documents, key_prefix="vendor"):
-
     col_widths = [2.5, 2.5, 1.5, 1.5, 1]
 
     headers = st.columns(col_widths)
@@ -906,15 +762,12 @@ def render_vendor_documents(documents, key_prefix="vendor"):
         col.caption(f"**{label}**")
 
     with st.container(height=520, border=True):
-
         if not documents:
             st.info("No documents found for this vendor.")
             return
 
         for doc in documents:
-
             with st.container(border=True):
-
                 cols = st.columns(
                     col_widths,
                     vertical_alignment="center"
@@ -972,171 +825,7 @@ def render_vendor_documents(documents, key_prefix="vendor"):
                     else:
                         st.caption("No file")
 
-
-def get_vendor_documents(vendor_id, category=None, search="", sort="Date",
-                         order="Descending"):
-
-    sort_columns = {
-        "Date": "d.created_at",
-        "Name": "d.file_name",
-        "Category": "d.category",
-    }
-
-    sort_by = sort_columns[sort]
-    order_by = "DESC" if order == "Descending" else "ASC"
-
-    like = f"%{search.strip()}%"
-    category_filter = category if category else None
-
-    return db.query(
-        f"""
-        SELECT
-            d.id,
-            d.file_name,
-            d.file_path,
-            d.mime_type,
-            d.category,
-            d.source,
-            d.created_at,
-
-            v.name AS vendor_name,
-
-            (SELECT r.rfq_number
-             FROM rfqs r
-             WHERE r.document_id = d.id
-             LIMIT 1) AS rfq_number,
-
-            (SELECT r.title
-             FROM rfqs r
-             WHERE r.document_id = d.id
-             LIMIT 1) AS rfq_title,
-
-            (SELECT r.status
-             FROM rfqs r
-             WHERE r.document_id = d.id
-             LIMIT 1) AS rfq_status,
-
-            (SELECT r.due_date
-             FROM rfqs r
-             WHERE r.document_id = d.id
-             LIMIT 1) AS rfq_due_date,
-
-            (SELECT l.doc_type
-             FROM legal_documents l
-             WHERE l.document_id = d.id
-             LIMIT 1) AS legal_type,
-
-            (SELECT l.status
-             FROM legal_documents l
-             WHERE l.document_id = d.id
-             LIMIT 1) AS legal_status,
-
-            (SELECT l.expiry_date
-             FROM legal_documents l
-             WHERE l.document_id = d.id
-             LIMIT 1) AS expiry_date,
-
-            (SELECT i.invoice_number
-             FROM invoices i
-             WHERE i.document_id = d.id
-             LIMIT 1) AS invoice_number,
-
-            (SELECT i.amount
-             FROM invoices i
-             WHERE i.document_id = d.id
-             LIMIT 1) AS invoice_amount,
-
-            (SELECT i.currency
-             FROM invoices i
-             WHERE i.document_id = d.id
-             LIMIT 1) AS invoice_currency,
-
-            (SELECT i.due_date
-             FROM invoices i
-             WHERE i.document_id = d.id
-             LIMIT 1) AS invoice_due_date,
-
-            (SELECT i.paid_date
-             FROM invoices i
-             WHERE i.document_id = d.id
-             LIMIT 1) AS paid_date
-
-        FROM documents d
-
-        LEFT JOIN vendors v ON v.id = d.vendor_id
-
-        WHERE d.category != 'quote'
-
-        AND (
-            d.vendor_id = ?
-
-            OR EXISTS (
-                SELECT 1
-                FROM legal_documents l
-                WHERE l.document_id = d.id
-                  AND l.vendor_id = ?
-            )
-
-            OR EXISTS (
-                SELECT 1
-                FROM invoices i
-                WHERE i.document_id = d.id
-                  AND i.vendor_id = ?
-            )
-        )
-
-        AND (? IS NULL OR d.category = ?)
-
-        AND (
-            d.file_name LIKE ?
-            OR d.category LIKE ?
-            OR d.source LIKE ?
-            OR COALESCE(v.name, '') LIKE ?
-
-            OR EXISTS (
-                SELECT 1
-                FROM rfqs r
-                WHERE r.document_id = d.id
-                  AND (
-                      r.rfq_number LIKE ?
-                      OR r.title LIKE ?
-                  )
-            )
-
-            OR EXISTS (
-                SELECT 1
-                FROM legal_documents l
-                WHERE l.document_id = d.id
-                  AND l.doc_type LIKE ?
-            )
-
-            OR EXISTS (
-                SELECT 1
-                FROM invoices i
-                WHERE i.document_id = d.id
-                  AND i.invoice_number LIKE ?
-            )
-        )
-
-        ORDER BY {sort_by} {order_by}, d.id DESC
-        """,
-        (
-            vendor_id,
-            vendor_id,
-            vendor_id,
-            category_filter,
-            category_filter,
-            like,
-            like,
-            like,
-            like,
-            like,
-            like,
-            like,
-            like,
-        ),
-    )
-
+# Documents
 with tab4:
 
     st.subheader("Vendor Documents")
@@ -1146,10 +835,7 @@ with tab4:
     )
 
     # Search and sorting
-    f1, f2, f3 = st.columns(
-        [3, 1, 1],
-        vertical_alignment="center"
-    )
+    f1, f2, f3 = st.columns([3, 1, 1], vertical_alignment="center")
 
     search = f1.text_input(
         "Search",

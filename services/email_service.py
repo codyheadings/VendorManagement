@@ -7,7 +7,7 @@ def build_rfq_email(vendor, rfq_data, pdf_bytes):
     msg = EmailMessage()
 
     msg["Subject"] = (
-        f"Request for Quote - {rfq_data['rfq_purpose']}"
+        f"Request for Quote - {rfq_data['rfq_subtitle']}"
     )
 
     msg["To"] = vendor["email"]
@@ -19,7 +19,7 @@ Hello {vendor['contact_name']},
 
 We are requesting a quotation for the following:
 
-Purpose: {rfq_data['rfq_purpose']}
+Purpose: {rfq_data['rfq_subtitle']}
 
 Quote Deadline: {rfq_data['rfq_deadline']}
 
