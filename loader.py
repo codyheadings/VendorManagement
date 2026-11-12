@@ -35,6 +35,7 @@ from pathlib import Path
 import db
 import extract
 import normalize
+from services.rfq_service import log_message
 from services.vendor_service import normalize_vendor_name
 
 DOCS_DIR = db.BASE_DIR / "data" / "documents"
@@ -349,6 +350,61 @@ def _apply_legal(conn, doc_id: int, d: dict, vendor_id: int) -> tuple[int, list[
     return legal_id, notes
 
 
+_PO_RE = re.compile(r"PO[-\s]?(\d{4})[-\s]?(\d{3,4})", re.IGNORECASE)
+
+
+def _apply_invoice(conn, doc_id: int, d: dict, vendor_id: int) -> tuple[int | None, list[str], str, str]:
+    """Insert an invoice as pending. Returns (invoice_id, notes, status, detail); status is applied | duplicate | invalid."""
+    notes: list[str] = []
+    missing = [label for key, label in (("invoice_number", "invoice number"), ("total_amount", "total amount"),
+                                         ("currency", "currency"), ("invoice_date", "invoice date")) if d.get(key) is None]
+    if missing:
+        return None, notes, "invalid", "the invoice is missing " + ", ".join(missing) + "; needs manual entry"
+
+    dup = conn.execute("SELECT id FROM invoices WHERE vendor_id = ? AND invoice_number = ?",
+                       (vendor_id, d["invoice_number"])).fetchone()
+    if dup:
+        return None, notes, "duplicate", f"invoice {d['invoice_number']} is already recorded (#{dup['id']})"
+
+    due = d.get("due_date")
+    if due is None and d.get("payment_terms_days") is not None:
+        due = normalize.derive_valid_until(d["invoice_date"], d["payment_terms_days"])
+        if due:
+            notes.append(f"due date derived: invoice date + {d['payment_terms_days']} days")
+    if due is None:
+        notes.append("no due date or payment term found; overdue reminders will not work for this invoice")
+
+    if d.get("subtotal") is not None and d.get("tax_amount") is not None \
+            and abs(d["subtotal"] + d["tax_amount"] - d["total_amount"]) > 0.01:
+        notes.append(f"subtotal {d['subtotal']:,.2f} + tax {d['tax_amount']:,.2f} does not equal the total "
+                     f"{d['total_amount']:,.2f}; check the document")
+
+    po_id = None
+    ref = d.get("po_reference")
+    if ref:
+        m = _PO_RE.search(ref)
+        if not m:
+            notes.append(f"unrecognised PO reference '{ref}'")
+        else:
+            number = f"PO-{m.group(1)}-{int(m.group(2)):03d}"
+            po = conn.execute("SELECT id, vendor_id FROM purchase_orders WHERE po_number = ?", (number,)).fetchone()
+            if po is None:
+                notes.append(f"the invoice cites {number}, which is not in the purchase order list")
+            elif po["vendor_id"] != vendor_id:
+                notes.append(f"the invoice cites {number}, which belongs to a different vendor; not linked")
+            else:
+                po_id = po["id"]
+    else:
+        notes.append("the invoice cites no purchase order")
+
+    invoice_id = conn.execute(
+        """INSERT INTO invoices (vendor_id, po_id, document_id, invoice_number, amount, currency, invoice_date, due_date,
+               po_reference, review_status, review_notes) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?)""",
+        (vendor_id, po_id, doc_id, d["invoice_number"], d["total_amount"], d["currency"], d["invoice_date"], due, ref,
+         _notes_json(d.get("flags"), notes))).lastrowid
+    return invoice_id, notes, "applied", "invoice recorded as pending review"
+
+
 # ---------- Applying: dispatch ----------
 
 def _finish(conn, ext_id: int, status: str, detail: str | None = None, summary: str | None = None,
@@ -361,6 +417,24 @@ def _finish(conn, ext_id: int, status: str, detail: str | None = None, summary: 
                                     ELSE action_status END,
                applied_at = CASE WHEN ? = 'applied' THEN datetime('now') ELSE applied_at END
            WHERE id = ?""", (status, detail, summary, action, action, status, status, ext_id))
+
+
+_EMAIL_KIND_TO_LOG = {"quote": "reply", "revision": "reply", "question": "question", "decline": "decline",
+                      "notice": "notice", "other": "notice"}
+
+
+def _log_email(conn, d: dict, doc, vendor_id: int | None, meta: dict) -> None:
+    """Put a vendor's email into the history of the RFQ it refers to (nothing if it names no known RFQ)."""
+    emb = d.get("quote") or {}
+    rfq, _ = resolve_rfq(conn, emb.get("rfq_reference") or d.get("rfq_reference"), vendor_id or 0, allow_infer=False)
+    if rfq is None:
+        return
+    body = d.get("summary") or "(no summary)"
+    if d.get("action_needed"):
+        body += f"\n\nAction needed: {d['action_needed']}"
+    log_message(conn, rfq["id"], "inbound", _EMAIL_KIND_TO_LOG.get(d.get("kind"), "notice"), body,
+                            vendor_id=vendor_id, document_id=doc["id"], channel="email",
+                            occurred_on=meta.get("sent_on") or db.TODAY)
 
 
 def _apply(conn, ext_id: int, vendor_override: int | None) -> Outcome:
@@ -391,6 +465,9 @@ def _apply(conn, ext_id: int, vendor_override: int | None) -> Outcome:
     loose = bool(vendor_id) and how.startswith(("vendor name '", "sender's company domain"))
     loader_notes = [f"vendor matched loosely: {how}"] if loose else []
 
+    if kind == "email":
+        _log_email(conn, d, doc, vendor_id, meta)
+
     # Emails that create no record need no vendor.
     if kind == "email" and d["kind"] in ("question", "notice", "other"):
         if vendor_id:
@@ -413,6 +490,15 @@ def _apply(conn, ext_id: int, vendor_override: int | None) -> Outcome:
         _finish(conn, ext_id, "applied", "legal document recorded as pending review",
                 f"{d['doc_type']} with {name or 'vendor'}")
         out.status, out.message = "applied", f"legal document #{legal_id} created (pending review)"
+        return out
+
+    if kind == "invoice":
+        invoice_id, notes, status, detail = _apply_invoice(conn, doc["id"], d, vendor_id)
+        out.notes = out.notes + notes
+        what = f"invoice {d.get('invoice_number') or ''} from {name or 'vendor'}".replace("  ", " ")
+        _finish(conn, ext_id, status, detail, what)
+        out.status = status
+        out.message = f"invoice #{invoice_id} created (pending review)" if status == "applied" else detail
         return out
 
     if kind == "email" and d["kind"] == "decline":
@@ -533,9 +619,6 @@ def ingest(path: Path, ctx: extract.RunContext) -> Outcome:
         if res.doc_type == "rfq":               # our own RFQs: parsed by rule, no AI
             import rfq_import
             return rfq_import.import_rfq(path)
-        if res.doc_type == "invoice":           # a known kind we don't extract yet: register the file only
-            doc_id, _ = _register(path, sha, res.doc_type, "email" if path.suffix.lower() == ".eml" else "upload", None)
-            return Outcome(path, "skipped", res.message, doc_id)
         return Outcome(path, "skipped", res.message)
     if res.status == "error":
         if res.message.startswith("unreadable"):  # permanent: keep the file visible for manual handling
@@ -601,7 +684,8 @@ def review_queue() -> list[dict]:
         f"""SELECT e.id, e.status, e.status_detail, e.summary, e.action_needed, e.action_status, e.doc_type,
                    e.errors_json, d.file_name
             FROM extractions e JOIN documents d ON d.id = e.document_id
-            WHERE e.status IN ({marks}) OR (e.action_needed IS NOT NULL AND e.action_status = 'open')
+            WHERE (e.status IN ({marks}) AND COALESCE(e.action_status, '') != 'dismissed')
+               OR (e.action_needed IS NOT NULL AND e.action_status = 'open')
             ORDER BY e.id""", REVIEW_STATUSES)
     return [dict(r) for r in rows]
 

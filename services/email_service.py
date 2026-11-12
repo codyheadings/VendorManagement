@@ -3,7 +3,6 @@ import streamlit as st
 from email.message import EmailMessage
 
 def build_rfq_email(vendor, rfq_data, pdf_bytes):
-
     msg = EmailMessage()
 
     msg["Subject"] = (
@@ -42,7 +41,7 @@ Thank you,
 
     return msg
 
-def send_rfq_email(msg):
+def send_email(msg):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
 
         smtp.login(
@@ -51,3 +50,12 @@ def send_rfq_email(msg):
         )
 
         smtp.send_message(msg)
+
+def build_simple_msg(contact_email: str, subject: str, body: str):
+    msg = EmailMessage()
+
+    msg["Subject"] = f"{subject.rstrip()}"
+    msg["To"] = f"{contact_email.rstrip()}"
+    msg.set_content(body.rstrip())
+    
+    return msg

@@ -16,10 +16,11 @@ import json
 import os
 import sys
 import urllib.error
+import tomllib
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-
+from pathlib import Path
 import db
 import loader
 
@@ -55,26 +56,52 @@ class Report:
 
 # ---------- configuration and transport ----------
 
-def webhook_url() -> str | None:
-    url = os.environ.get("SLACK_WEBHOOK_URL")
-    if not url:
+def _secrets_files() -> list[Path]:
+    """Where Streamlit looks for secrets, plus the project folder (so the command line works from anywhere)."""
+    return [db.BASE_DIR / ".streamlit" / "secrets.toml", Path.cwd() / ".streamlit" / "secrets.toml",
+            Path.home() / ".streamlit" / "secrets.toml"]
+
+
+def _secret(name: str) -> tuple[str | None, str]:
+    """Look a setting up. Returns (value or None, where it came from or why it was not found)."""
+    if os.environ.get(name):
+        return os.environ[name].strip(), "environment variable"
+    for path in dict.fromkeys(_secrets_files()):          # the same file may be listed twice
+        if not path.is_file():
+            continue
         try:
-            import streamlit as st
-            url = st.secrets.get("SLACK_WEBHOOK_URL")
-        except Exception:
-            url = None
-    return url.strip() if url else None
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            return None, f"{path} could not be read ({type(e).__name__}: {e})"
+        if isinstance(data.get(name), str) and data[name].strip():
+            return data[name].strip(), str(path)
+        return None, (f"{path} has no top-level {name}. Top-level keys found: "
+                      f"{', '.join(k for k, v in data.items() if not isinstance(v, dict)) or '(none)'}"
+                      + (f"; sections: {', '.join(k for k, v in data.items() if isinstance(v, dict))}" if any(isinstance(v, dict) for v in data.values()) else ""))
+    return None, "no secrets.toml found in: " + "; ".join(str(p) for p in dict.fromkeys(_secrets_files()))
+
+
+def webhook_url() -> str | None:
+    return _secret("SLACK_WEBHOOK_URL")[0]
 
 
 def app_url() -> str | None:
-    url = os.environ.get("APP_URL")
-    if not url:
-        try:
-            import streamlit as st
-            url = st.secrets.get("APP_URL")
-        except Exception:
-            url = None
-    return url
+    return _secret("APP_URL")[0]
+
+
+def diagnose() -> list[str]:
+    """Plain-language report on why alerts may not be reaching Slack. Never prints the URL itself."""
+    url, where = _secret("SLACK_WEBHOOK_URL")
+    if url is None:
+        return [f"SLACK_WEBHOOK_URL not found: {where}"]
+    out = [f"SLACK_WEBHOOK_URL found ({where})"]
+    if not url.startswith("https://hooks.slack.com/"):
+        out.append("It does not start with https://hooks.slack.com/ : check you copied the Incoming Webhook URL, "
+                   "not an app or channel link.")
+    if url != url.strip('"\' '):
+        out.append("It contains stray quote characters.")
+    return out
 
 
 def post_to_slack(url: str, text: str) -> tuple[bool, str]:
@@ -89,7 +116,7 @@ def post_to_slack(url: str, text: str) -> tuple[bool, str]:
             if e.code in (429, 500, 502, 503, 504) and attempt == 1:
                 continue                                    # one retry for rate limits / server trouble
             return False, f"Slack answered {e.code}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  network down, DNS, timeout
             if attempt == 1:
                 continue
             return False, f"could not reach Slack ({type(e).__name__})"
@@ -118,6 +145,9 @@ def review_alerts() -> list[Alert]:
     for r in db.query("""SELECT l.id, l.doc_type, v.name AS v FROM legal_documents l
                          JOIN vendors v ON v.id = l.vendor_id WHERE l.review_status = 'pending'"""):
         out.append(Alert(f"review:legal:{r['id']}", "review", f"{r['doc_type']} with {r['v']}"))
+    for r in db.query("""SELECT i.id, i.invoice_number AS num, v.name AS v FROM invoices i
+                         JOIN vendors v ON v.id = i.vendor_id WHERE i.review_status = 'pending'"""):
+        out.append(Alert(f"review:invoice:{r['id']}", "review", f"Invoice {r['num']} from {r['v']}"))
     for r in loader.review_queue():
         what = {"needs_vendor": "needs a vendor", "invalid": "failed checks", "failed": "failed to load"}.get(r["status"], "needs follow-up")
         out.append(Alert(f"review:extraction:{r['id']}:{r['status']}", "review", f"{r['file_name']}: {what}"))
@@ -162,9 +192,22 @@ def legal_alerts() -> list[Alert]:
     return out
 
 
+def payment_alerts() -> list[Alert]:
+    """Approved, unpaid invoices past their due date. Repeats weekly until a payment is recorded."""
+    out = []
+    for r in db.query(
+            """SELECT i.id, i.invoice_number AS num, i.due_date, v.name AS v FROM invoices i JOIN vendors v ON v.id = i.vendor_id
+               WHERE i.review_status = 'approved' AND i.paid_date IS NULL AND i.due_date IS NOT NULL AND i.due_date < ?""", (db.TODAY,)):
+        days = (date.fromisoformat(db.TODAY) - date.fromisoformat(r["due_date"])).days
+        out.append(Alert(f"pay:{r['id']}:w{days // LATE_REPEAT_DAYS}", "pay",
+                         f"Invoice {r['num']} from {r['v']} is {days} day{'s' * (days != 1)} overdue (due {r['due_date']})"))
+    return out
+
+
 _HEADERS = {"review": ":inbox_tray: *{n} item{s} waiting for review*",
             "late": ":alarm_clock: *{n} late vendor repl{s}*",
-            "legal": ":page_facing_up: *{n} legal document{s} need attention*"}
+            "legal": ":page_facing_up: *{n} legal document{s} need attention*",
+            "pay": ":money_with_wings: *{n} overdue invoice{s}*"}
 
 
 def _message(kind: str, alerts: list[Alert]) -> str:
@@ -182,8 +225,16 @@ def _message(kind: str, alerts: list[Alert]) -> str:
 
 # ---------- running ----------
 
-def run_checks(kinds: tuple[str, ...] = ("review", "late", "legal"), dry_run: bool = False, sender=None) -> Report:
+def run_checks(kinds: tuple[str, ...] = ("review", "late", "legal", "pay"), dry_run: bool = False, sender=None) -> Report:
     """Find unsent alerts and send them. sender(url, text) -> (ok, error) can be replaced in tests."""
+    # Global notification toggle
+    if not db.NOTIFICATIONS_ENABLED:
+        return Report(
+            configured=False,
+            pending=[],
+            errors=[]
+        )
+
     _ensure()
     url = webhook_url()
     report = Report(configured=bool(url))
@@ -215,12 +266,20 @@ def run_checks(kinds: tuple[str, ...] = ("review", "late", "legal"), dry_run: bo
 
 
 def run_if_due(sender=None) -> Report | None:
-    """For app start-up: run at most once per MIN_MINUTES_BETWEEN_RUNS (a Streamlit app has no scheduler)."""
+    """For app start-up: run at most once per MIN_MINUTES_BETWEEN_RUNS."""
+
+    if not db.NOTIFICATIONS_ENABLED:
+        return None
+    
     _ensure()
     row = db.query_one("SELECT sent_at FROM notification_log WHERE key = 'last_run'")
     if row and db.scalar("SELECT (julianday('now') - julianday(?)) * 1440", (row["sent_at"],)) < MIN_MINUTES_BETWEEN_RUNS:
         return None
     report = run_checks(sender=sender)
+
+    if not db.NOTIFICATIONS_ENABLED:
+        return None
+
     with db.transaction() as conn:
         conn.execute("INSERT INTO notification_log (key, kind) VALUES ('last_run', 'meta') "
                      "ON CONFLICT(key) DO UPDATE SET sent_at = datetime('now')")
@@ -228,9 +287,24 @@ def run_if_due(sender=None) -> Report | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if not db.NOTIFICATIONS_ENABLED:
+        print("Slack notifications are disabled.")
+        return 0
+    
     ap = argparse.ArgumentParser(description="Send Slack alerts.")
     ap.add_argument("--dry-run", action="store_true", help="show what would be sent; send and remember nothing")
+    ap.add_argument("--check-config", action="store_true", help="explain whether the Slack webhook is found")
+    ap.add_argument("--test", action="store_true", help="send one test message to the channel")
     args = ap.parse_args(argv)
+    if args.check_config or args.test:
+        for line in diagnose():
+            print(line)
+        url = webhook_url()
+        if args.test and url:
+            ok, err = post_to_slack(url, ":white_check_mark: Test message from the vendor platform.")
+            print("Test message sent. Check the channel." if ok else f"Test message failed: {err}")
+            return 0 if ok else 1
+        return 0 if url else 1
     db.ensure_db()
     r = run_checks(dry_run=args.dry_run)
     if not r.configured and not args.dry_run:

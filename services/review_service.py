@@ -107,6 +107,7 @@ def counts() -> dict:
     return {
         "quotes": db.scalar("SELECT COUNT(*) FROM quotes WHERE review_status = 'pending'"),
         "legal": db.scalar("SELECT COUNT(*) FROM legal_documents WHERE review_status = 'pending'"),
+        "invoices": db.scalar("SELECT COUNT(*) FROM invoices WHERE review_status = 'pending'"),
         "attention": len(loader.review_queue()),
     }
 
@@ -352,3 +353,92 @@ def resolve_action(extraction_id: int, how: str) -> None:
     if how not in ("done", "dismissed"):
         raise ValueError(how)
     db.execute("UPDATE extractions SET action_status = ? WHERE id = ?", (how, extraction_id))
+
+
+# ---------- invoices ----------
+
+def pending_invoices() -> list[dict]:
+    return [dict(r) for r in db.query(
+        """SELECT i.id, i.invoice_number, i.amount, i.currency, i.invoice_date, v.name AS vendor_name
+           FROM invoices i JOIN vendors v ON v.id = i.vendor_id WHERE i.review_status = 'pending'
+           ORDER BY i.created_at, i.id""")]
+
+
+def vendor_pos(vendor_id: int) -> list[dict]:
+    """Purchase orders an invoice from this vendor could belong to."""
+    return [dict(r) for r in db.query(
+        "SELECT id, po_number, amount, currency, status FROM purchase_orders WHERE vendor_id = ? AND status != 'cancelled' "
+        "ORDER BY po_number", (vendor_id,))]
+
+
+def invoice_detail(invoice_id: int) -> dict | None:
+    import services.purchasing_service
+    row = db.query_one("SELECT i.*, v.name AS vendor_name FROM invoices i JOIN vendors v ON v.id = i.vendor_id WHERE i.id = ?",
+                       (invoice_id,))
+    if row is None:
+        return None
+    d = dict(row)
+    d["notes"] = _notes(d["review_notes"])
+    d["amount_usd"] = usd_equivalent(d["amount"], d["currency"])
+    d["warnings"] = services.purchasing_service.invoice_warnings(d)
+    return d
+
+
+def review_invoice(invoice_id: int, values: dict, decision: str, reason: str | None = None) -> Result:
+    """Save edits and approve or reject an invoice, atomically. Approving makes it count as spend."""
+    if decision not in ("approve", "reject", "save"):
+        return Result(False, [f"unknown decision {decision!r}"])
+    reason = _opt(reason)
+    if decision == "reject" and not reason:
+        return Result(False, ["Give a short reason for rejecting; it is kept on the record."])
+    errors: list[str] = []
+    cur = (_opt(values.get("currency")) or "").upper()
+    if cur and not re.fullmatch(r"[A-Z]{3}", cur):
+        errors.append(f"Currency: '{cur}' is not a 3-letter code such as USD, GBP or EUR")
+    clean = {
+        "vendor_id": values.get("vendor_id"),
+        "po_id": values.get("po_id") or None,
+        "invoice_number": _opt(values.get("invoice_number")),
+        "amount": _number(values.get("amount"), "Amount", errors),
+        "currency": cur or None,
+        "invoice_date": _iso(values.get("invoice_date"), "Invoice date", errors),
+        "due_date": _iso(values.get("due_date"), "Due date", errors),
+    }
+    if not clean["vendor_id"]:
+        errors.append("Vendor is required")
+    if clean["invoice_date"] and clean["due_date"] and clean["due_date"] < clean["invoice_date"]:
+        errors.append("Due date is earlier than the invoice date")
+    if decision == "approve":
+        for key, label in (("invoice_number", "invoice number"), ("amount", "amount"), ("currency", "currency"),
+                           ("invoice_date", "invoice date")):
+            if clean[key] is None:
+                errors.append(f"Set the {label} before approving.")
+    if errors:
+        return Result(False, errors)
+    try:
+        with db.transaction() as conn:
+            old = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+            if old is None:
+                return Result(False, ["That invoice no longer exists."])
+            if old["review_status"] != "pending":
+                return Result(False, [f"This invoice was already {old['review_status']}."])
+            if clean["po_id"]:
+                po = conn.execute("SELECT vendor_id FROM purchase_orders WHERE id = ?", (clean["po_id"],)).fetchone()
+                if po is None or po["vendor_id"] != clean["vendor_id"]:
+                    return Result(False, ["That purchase order does not belong to this vendor."])
+            changes = [f"{k}: {old[k]!r} -> {v!r}" for k, v in clean.items() if old[k] != v]
+            conn.execute(f"UPDATE invoices SET {', '.join(f'{k} = ?' for k in clean)} WHERE id = ?", (*clean.values(), invoice_id))
+            if changes:
+                _add_note(conn, "invoices", invoice_id, "edited " + "; ".join(changes))
+            if decision == "approve":
+                conn.execute("UPDATE invoices SET review_status = 'approved' WHERE id = ?", (invoice_id,))
+                _add_note(conn, "invoices", invoice_id, "approved")
+            elif decision == "reject":
+                conn.execute("UPDATE invoices SET review_status = 'rejected' WHERE id = ?", (invoice_id,))
+                _add_note(conn, "invoices", invoice_id, f"rejected: {reason}")
+    except Exception as e:
+        msg = str(e)
+        if "UNIQUE" in msg and "invoice_number" in msg:
+            return Result(False, ["This vendor already has an invoice with that number."])
+        return Result(False, [f"Could not save: {e}"])
+    return Result(True, message={"approve": "Invoice approved.", "reject": "Invoice rejected.", "save": "Changes saved."}[decision])

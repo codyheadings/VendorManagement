@@ -53,43 +53,38 @@ CREATE TABLE rfqs (
   title TEXT NOT NULL,
   contact_email TEXT NOT NULL,
   deliver_to TEXT NOT NULL,
-  issue_date TEXT NOT NULL
-      CHECK (date(issue_date) = issue_date),
-  due_date TEXT
-      CHECK (due_date IS NULL OR date(due_date) = due_date),
-  status TEXT NOT NULL DEFAULT 'draft'
-      CHECK (status IN ('draft', 'open', 'closed', 'cancelled')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (due_date IS NULL OR due_date >= issue_date)
+  issue_date TEXT NOT NULL CHECK (date(issue_date) = issue_date),
+  due_date TEXT CHECK (due_date IS NULL OR date(due_date) = due_date),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'open', 'closed', 'cancelled')),
+  awarded_vendor_id INTEGER REFERENCES vendors(id),  -- vendor whose quote was accepted
+  created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (due_date IS NULL OR due_date >= issue_date),
 ) STRICT;
 
 CREATE TABLE rfq_items (
-    id INTEGER PRIMARY KEY,
-    rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
-    line_number INTEGER NOT NULL,
-    description TEXT NOT NULL,
-    quantity REAL CHECK (quantity IS NULL OR quantity > 0),
-    unit TEXT,
-    requirement TEXT,
-    UNIQUE (rfq_id, line_number)
+  id INTEGER PRIMARY KEY,
+  rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+  line_number INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  quantity REAL CHECK (quantity IS NULL OR quantity > 0),
+  unit TEXT,
+  requirement TEXT,
+  UNIQUE (rfq_id, line_number)
 ) STRICT;
 
 CREATE TABLE rfq_specifications (
-    id INTEGER PRIMARY KEY,
-    rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
-    line_number INTEGER NOT NULL,
-    description TEXT NOT NULL,
-
-    UNIQUE (rfq_id, line_number)
+  id INTEGER PRIMARY KEY,
+  rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+  line_number INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  UNIQUE (rfq_id, line_number)
 ) STRICT;
 
 CREATE TABLE rfq_quote_requirements (
-    id INTEGER PRIMARY KEY,
-    rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
-    line_number INTEGER NOT NULL,
-    description TEXT NOT NULL,
-
-    UNIQUE (rfq_id, line_number)
+  id INTEGER PRIMARY KEY,
+  rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+  line_number INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  UNIQUE (rfq_id, line_number)
 ) STRICT;
 
 CREATE TABLE rfq_invitations (
@@ -200,7 +195,7 @@ CREATE TABLE legal_documents (
 CREATE TABLE extractions (
   id INTEGER PRIMARY KEY,
   document_id INTEGER NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
-  doc_type TEXT NOT NULL CHECK (doc_type IN ('quote','legal','email','other')),
+  doc_type TEXT NOT NULL CHECK (doc_type IN ('quote','legal','email','invoice','other')),
   model TEXT,
   schema_version INTEGER,
   validity TEXT NOT NULL CHECK (validity IN ('ok','invalid')),
@@ -217,6 +212,24 @@ CREATE TABLE extractions (
 ) STRICT;
 
 
+-- ---------- RFQ history: follow-ups, vendor questions, notes ----------
+
+CREATE TABLE rfq_messages (
+  id INTEGER PRIMARY KEY,
+  rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+  vendor_id INTEGER REFERENCES vendors(id),
+  document_id INTEGER REFERENCES documents(id),
+  direction TEXT NOT NULL CHECK (direction IN ('outbound','inbound','internal')),
+  kind TEXT NOT NULL CHECK (kind IN ('followup','question','decline','reply','notice','note','status')),
+  channel TEXT NOT NULL DEFAULT 'system' CHECK (channel IN ('email','manual','system')),
+  subject TEXT,
+  body TEXT NOT NULL,
+  occurred_on TEXT NOT NULL CHECK (date(occurred_on) = occurred_on),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+) STRICT;
+CREATE UNIQUE INDEX idx_rfq_messages_doc ON rfq_messages(rfq_id, document_id) WHERE document_id IS NOT NULL;
+CREATE INDEX idx_rfq_messages_rfq ON rfq_messages(rfq_id, occurred_on);
+
 -- ---------- Vendor hub ----------
 
 CREATE TABLE purchase_orders (
@@ -229,6 +242,7 @@ CREATE TABLE purchase_orders (
   currency TEXT NOT NULL CHECK (length(currency) = 3 AND currency = upper(currency)),
   status TEXT NOT NULL DEFAULT 'open'
     CHECK (status IN ('open','received','closed','cancelled')),
+  notes TEXT CHECK (notes IS NULL OR json_valid(notes)),            -- history: who did what, when
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
 
@@ -243,6 +257,10 @@ CREATE TABLE invoices (
   invoice_date TEXT NOT NULL CHECK (date(invoice_date) = invoice_date),
   due_date TEXT CHECK (due_date IS NULL OR date(due_date) = due_date),
   paid_date TEXT CHECK (paid_date IS NULL OR date(paid_date) = paid_date),
+  po_reference TEXT,
+  review_status TEXT NOT NULL DEFAULT 'approved'
+    CHECK (review_status IN ('pending','approved','rejected')),
+  review_notes TEXT CHECK (review_notes IS NULL OR json_valid(review_notes)),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (vendor_id, invoice_number)
 ) STRICT;
@@ -283,6 +301,7 @@ CREATE INDEX idx_documents_vendor           ON documents(vendor_id);
 CREATE INDEX idx_invitations_vendor         ON rfq_invitations(vendor_id);
 CREATE INDEX idx_quotes_vendor              ON quotes(vendor_id);
 CREATE INDEX idx_quotes_rfq                 ON quotes(rfq_id);
+CREATE INDEX idx_rfq_vendor                 ON rfqs(awarded_vendor_id);
 CREATE INDEX idx_rfq_items_rfq_id           ON rfq_items(rfq_id);
 CREATE INDEX idx_rfq_invitations_rfq_id     ON rfq_invitations(rfq_id);
 CREATE INDEX idx_rfq_invitations_vendor_id  ON rfq_invitations(vendor_id);

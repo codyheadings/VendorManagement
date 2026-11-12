@@ -19,7 +19,7 @@ def _show_result(result) -> None:
         st.info("This needs a person. It is listed in the review queue.")
 
 
-@st.dialog("Upload files", width="large")
+@st.dialog("Upload files", width=1440)
 def show_upload_dialog():
     left, right = st.columns(2)
 
@@ -86,6 +86,9 @@ def show_upload_dialog():
             with st.spinner("Working..."):
                 try:
                     state["result"] = up.commit(kind, state["path"], allow_ai=pre.needs_ai, type_confirmed=confirmed)
+
+                    st.session_state["refresh_insights"] = True
+                    
                     try:                                    # tell Slack about new review items; never block the upload
                         notify.run_checks(("review",))
                     except Exception:

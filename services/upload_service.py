@@ -28,9 +28,12 @@ UPLOAD_KINDS = {
     "Vendor quote": ("quote", readers.SUPPORTED_SUFFIXES - {".eml"}),
     "Vendor email (.eml)": ("email", {".eml"}),
     "Legal document (NDA / MSA / SOW)": ("legal", readers.SUPPORTED_SUFFIXES - {".eml"}),
+    "Vendor invoice": ("invoice", readers.SUPPORTED_SUFFIXES - {".eml"}),
 }
-AI_KINDS = {"quote", "email", "legal"}
+AI_KINDS = {"quote", "email", "legal", "invoice"}
 _STAGING = Path(tempfile.gettempdir()) / "uploads"
+
+
 PASTE_KINDS = {"vendors", "email", "quote", "legal"}      # types that also accept pasted text
 MAX_PASTE_CHARS = 100_000
 _HEADER_RE = re.compile(r"^(From|To|Date|Subject|Cc):[ \t]*(.*)$", re.IGNORECASE)
@@ -89,8 +92,8 @@ def _email_from_text(text: str) -> tuple[str, str, bool]:
         except Exception:
             pass
     return "pasted_email.txt", text, False
- 
- 
+
+
 def save_pasted(text: str, kind: str) -> tuple[Path, list[str]]:
     """Stage pasted text as a file so it goes through exactly the same pipeline as an upload.
  

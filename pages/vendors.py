@@ -3,7 +3,8 @@ from pathlib import Path
 import streamlit as st
 import db
 import notify
-from services.email_service import build_rfq_email, send_rfq_email
+from services.email_service import build_rfq_email, send_email
+from services.review_service import attention_items
 from services.rfq_service import *
 from io import BytesIO
 from services.rfq_pdf_service import generate_rfq_pdf
@@ -22,6 +23,12 @@ notify.run_if_due()
 # Main page content
 st.markdown("# Vendor Overview")
 st.caption("View and manage your vendors.")
+
+def send_rfq_email(email):
+    if not db.SEND_ENABLED:
+        raise SystemError("Sending mail on this app has been disabled.")
+    else:
+        send_email(email)
 
 @st.dialog("Add Vendor", width="medium")
 def show_vendor_form():
@@ -63,6 +70,7 @@ def show_vendor_form():
         else:
             try:
                 add_vendor_with_contact(v_name, v_category, v_country, v_contact, v_email, role)
+                st.session_state["refresh_insights"] = True
             except ValueError as e:
                 st.error(str(e))
             else:
@@ -220,7 +228,6 @@ def remove_dynamic_row(key, row_id):
 
 
 def dynamic_list_input(label, key, placeholder="Enter an item..."):
-
     st.write(f"**{label}**")
 
     initialize_dynamic_list(key)
@@ -255,7 +262,6 @@ def dynamic_list_input(label, key, placeholder="Enter an item..."):
     )
 
 def initialize_rfq_items():
-
     if "rfq_item_rows" not in st.session_state:
         st.session_state.rfq_item_rows = []
 
@@ -264,7 +270,6 @@ def initialize_rfq_items():
 
 
 def add_rfq_item():
-
     row_id = f"rfq_item_{len(st.session_state.rfq_item_rows)}"
 
     st.session_state.rfq_item_rows.append(row_id)
@@ -276,12 +281,10 @@ def add_rfq_item():
 
 
 def remove_rfq_item(row_id):
-
     st.session_state.rfq_item_rows.remove(row_id)
 
 
 def dynamic_rfq_items():
-
     st.write("**Requested Items**")
 
     initialize_rfq_items()
@@ -550,6 +553,98 @@ def reset_vendor_selection():
 
     st.session_state.selected_vendor_ids.clear()
 
+def get_insights_data():
+    """Fetch the latest dashboard metrics."""
+
+    return {
+        "total_vendors": db.scalar(
+            "SELECT COUNT(*) FROM vendors"
+        ),
+        "active_vendors": db.scalar(
+            "SELECT COUNT(*) FROM vendors WHERE status = 'active'"
+        ),
+        "vendor_countries": db.scalar(
+            "SELECT COUNT(DISTINCT country) FROM vendors WHERE country != ''"
+        ),
+        "open_rfqs": db.scalar(
+            "SELECT COUNT(*) FROM rfqs WHERE status = 'open'"
+        ),
+        "draft_rfqs": db.scalar(
+            "SELECT COUNT(*) FROM rfqs WHERE status = 'draft'"
+        ),
+        "payment_orders": db.scalar("SELECT COUNT(*) FROM purchase_orders"),
+        "quotes": db.scalar(
+            "SELECT COUNT(*) FROM quotes WHERE review_status = 'pending'"
+        ),
+        "legal_docs": db.scalar(
+            "SELECT COUNT(*) FROM legal_documents WHERE review_status = 'pending'"
+        ),
+        "attention": len(attention_items()),
+    }
+
+
+@st.fragment(run_every="2s")
+def render_insights():
+    # Refresh metrics only when requested, or on first page load.
+    if ("insights_data" not in st.session_state or st.session_state.get("refresh_insights", False)):
+        st.session_state.insights_data = get_insights_data()
+        st.session_state.refresh_insights = False
+
+    data = st.session_state.insights_data
+
+    with st.container(horizontal_alignment="right", height="stretch"):
+        st.subheader("Insights")
+
+        st.caption("Vendors")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Total Vendors", data["total_vendors"])
+        col2.metric("Active Vendors", data["active_vendors"])
+        col3.metric("Countries", data["vendor_countries"])
+
+        st.divider()
+
+        st.caption("Quotes and Payment")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Open Quote Requests", data["open_rfqs"])
+        col2.metric("Quote Request Drafts", data["draft_rfqs"])
+        col3.metric("Payment Orders", data["payment_orders"])
+
+        st.divider()
+
+        st.caption("Review")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Pending Quotations", data["quotes"])
+        col2.metric("Pending Legal Documents", data["legal_docs"])
+        col3.metric("Unresolved Items", data["attention"])
+
+        needs_attention = (
+            data["quotes"] > 0
+            or data["legal_docs"] > 0
+            or data["attention"] > 0
+        )
+
+        with st.container(horizontal=True, vertical_alignment="center"):
+            if needs_attention:
+                st.warning(
+                    "Review actions needed, view your queue to get started."
+                )
+            else:
+                st.success(
+                    "No review actions needed at this time."
+                )
+
+            if st.button(
+                "View Queue",
+                type="primary" if needs_attention else "secondary",
+            ):
+                st.switch_page("pages/review_queue.py")
+
 if "selected_vendor_ids" not in st.session_state:
     st.session_state.selected_vendor_ids = set()
 
@@ -593,43 +688,44 @@ with vendors_col:
             col.caption(f"**{label.upper()}**")
 
     with st.container(height=540, border=True):
-        for v in vendors:
-            checkbox_key = f"select_vendor_{v['id']}"
+        with st.spinner():
+            for v in vendors:
+                checkbox_key = f"select_vendor_{v['id']}"
 
-            # Restore checkbox state from persistent selection
-            if checkbox_key not in st.session_state:
-                st.session_state[checkbox_key] = (
-                    v["id"] in st.session_state.selected_vendor_ids
-                )
+                # Restore checkbox state from persistent selection
+                if checkbox_key not in st.session_state:
+                    st.session_state[checkbox_key] = (
+                        v["id"] in st.session_state.selected_vendor_ids
+                    )
 
-            with st.container(key=f"row_{v['id']}", border=True):
-                cols = st.columns(COL_WIDTHS, vertical_alignment="center")
+                with st.container(key=f"row_{v['id']}", border=True):
+                    cols = st.columns(COL_WIDTHS, vertical_alignment="center")
 
-                cols[0].checkbox(
-                    "Select",
-                    key=checkbox_key,
-                    label_visibility="collapsed",
-                    on_change=update_vendor_selection,
-                    args=(v["id"],),
-                )
+                    cols[0].checkbox(
+                        "Select",
+                        key=checkbox_key,
+                        label_visibility="collapsed",
+                        on_change=update_vendor_selection,
+                        args=(v["id"],),
+                    )
 
-                if cols[1].button(v["name"], key=f"vendor_{v['id']}", type="tertiary"):
-                    st.session_state["selected_vendor_id"] = v["id"]
-                    st.switch_page("pages/vendor_profile.py")
+                    if cols[1].button(v["name"], key=f"vendor_{v['id']}", type="tertiary"):
+                        st.session_state["selected_vendor_id"] = v["id"]
+                        st.switch_page("pages/vendor_profile.py")
 
-                cols[2].write(v["category"] or "—")
-                cols[3].write(v["country"] or "—")
+                    cols[2].write(v["category"] or "—")
+                    cols[3].write(v["country"] or "—")
 
-                with cols[4]:
-                    if v["primary_contact"]:
-                        st.write(v["primary_contact"])
-                        st.caption(v["contact_email"])
-                    else:
-                        st.caption("No primary contact")
+                    with cols[4]:
+                        if v["primary_contact"]:
+                            st.write(v["primary_contact"])
+                            st.caption(v["contact_email"])
+                        else:
+                            st.caption("No primary contact")
 
-                with cols[5]:
-                    with st.container(horizontal_alignment="center"):
-                        st.badge(v["status"].capitalize(), color=STATUS_COLORS.get(v["status"], "gray"))
+                    with cols[5]:
+                        with st.container(horizontal_alignment="center"):
+                            st.badge(v["status"].capitalize(), color=STATUS_COLORS.get(v["status"], "gray"))
 
         if limit < total:
             if st.button(f"Load more ({total - limit} remaining)", use_container_width=True):
@@ -661,31 +757,4 @@ with vendors_col:
             st.button("Deselect All", on_click=reset_vendor_selection, use_container_width=True)
 
 with insights_col:
-    with st.container(horizontal_alignment="center", height="stretch"):
-        st.subheader("Insights")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            total_vendors = db.scalar("SELECT COUNT(*) FROM vendors")
-            st.metric("Total Vendors", total_vendors)
-
-        with col2:
-            active_vendors = db.scalar("SELECT COUNT(*) FROM vendors WHERE status LIKE 'active'")
-            st.metric("Active Vendors", active_vendors)
-
-        with col3:
-            vendor_countries = db.scalar("SELECT COUNT(DISTINCT country) FROM vendors")
-            st.metric("Countries", vendor_countries)
-            
-        st.divider()
-        st.metric(
-            "Open Quote Requests",
-            db.scalar("SELECT COUNT(*) FROM rfqs WHERE status = 'open'"),
-        )
-        st.divider()
-
-        st.metric(
-            "Documents Pending",
-            db.scalar("SELECT COUNT(*) FROM quotes WHERE review_status = 'pending'"),
-        )
-        st.divider()
+    render_insights()

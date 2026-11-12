@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import db
+from services.document_service import show_source
 from util import fmt_price
 
 st.set_page_config(
@@ -13,43 +14,6 @@ DOCS_DIR = (db.BASE_DIR / "data" ).resolve()  # only files under here can be ope
 IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
 REVIEW_COLORS = {"pending": "orange", "approved": "green", "rejected": "red"}
 COL_WIDTHS = [2.5, 2, 2.5, 1.5, 2, 1.7, 1.5]
-
-@st.dialog("Source document", width="large")
-def show_source(file_name: str, file_path: str, mime_type: str | None):
-    path = Path(file_path)
-    if not path.is_absolute():
-        path = db.BASE_DIR / path
-    path = path.resolve()
-
-    # Never serve anything outside the data folder
-    if not path.is_relative_to(DOCS_DIR):
-        st.error("This file is outside the allowed documents folder.")
-        return
-    if not path.exists():
-        st.error("The file is missing from disk.")
-        return
-
-    st.caption(file_name)
-    suffix = path.suffix.lower()
-    try:
-        if suffix == ".pdf":
-            st.pdf(str(path), height=600)
-        elif suffix in IMAGE_TYPES:
-            st.image(str(path))
-        elif suffix in {".eml", ".txt"}:
-            st.text(path.read_text(errors="replace")[:8000])
-        else:
-            st.info("No inline preview for this file type. Use the download button.")
-    except Exception:
-        st.warning("Couldn't preview this file. Use the download button.")
-
-    st.download_button(
-        "Download original",
-        data=path.read_bytes(),
-        file_name=file_name,
-        mime=mime_type or "application/octet-stream",
-        icon=":material/download:",
-    )
 
 
 st.title("Quotes")
@@ -72,7 +36,13 @@ status = status_filter.lower()
 
 sort_columns = {
     "Date": "q.quote_date",
-    "Price": "q.total_amount",
+    "Price": """
+        CASE
+            WHEN q.currency = 'USD' THEN q.total_amount
+            WHEN er.rate_to_usd IS NOT NULL THEN q.total_amount * er.rate_to_usd
+            ELSE NULL
+        END
+    """,
     "Delivery": "q.delivery_time_days",
 }
 

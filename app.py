@@ -26,10 +26,12 @@ pages = {
     "": [
         st.Page("pages/vendors.py", title="Dashboard", icon=":material/analytics:", default=True),
         st.Page("pages/review_queue.py", title="Review Queue", icon=":material/rate_review:"),
+        st.Page("pages/purchasing.py", title="Purchasing", icon=":material/universal_currency_alt:"),
         st.Page("pages/vendor_profile.py", title="Vendor Profile", icon=":material/business:", visibility="hidden"),
     ],
     "Resources": [
         st.Page("pages/quotes.py", title="View Quotes", icon=":material/document_search:"),
+        st.Page("pages/rfq_manager.py", title="Manage RFQs", icon=":material/request_quote:"),
         st.Page("pages/documents.py", title="Other Documents", icon=":material/folder_open:"),
     ],
 }

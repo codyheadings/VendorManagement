@@ -239,3 +239,51 @@ class EmailExtraction(_Scrubbed):
     confidence: float = Field(0.0, ge=0, le=1)
 
     _trim = field_validator("flags", "field_sources", mode="before", check_fields=False)(classmethod(_truncate_lists))
+
+
+class InvoiceExtraction(_Scrubbed):
+    source_language: str | None = Field(None, description="ISO 639-1 code of the document language")
+    vendor_name: str | None = Field(None, description="The vendor issuing the invoice")
+    invoice_number: str | None = Field(None, description="The vendor's invoice number")
+    po_reference: str | None = Field(None, description="Our purchase order number if the invoice cites one, e.g. PO-2026-003")
+    invoice_date: str | None = Field(None, description="ISO date YYYY-MM-DD")
+    due_date: str | None = Field(None, description="ISO date YYYY-MM-DD, only if stated as a date")
+    payment_terms_days: int | None = Field(None, description="Payment term in days, only if stated as a duration (e.g. net 30)")
+    currency: str | None = Field(None, description="3-letter ISO 4217 code")
+    total_amount: float | None = Field(None, description="Final amount due including tax and shipping, as a plain number")
+    subtotal: float | None = Field(None, description="Amount before tax, if shown")
+    tax_amount: float | None = Field(None, description="Tax / VAT amount, if shown")
+    flags: list[str] = Field(default_factory=list, max_length=5, description="Problems only; empty if none")
+    field_sources: list[FieldSource] = Field(default_factory=list, max_length=6,
+                                             description="Verbatim evidence for total_amount, invoice_date, due_date")
+    confidence: float = Field(0.0, ge=0, le=1)
+
+    _trim = field_validator("flags", "field_sources", mode="before", check_fields=False)(classmethod(_truncate_lists))
+
+    @field_validator("invoice_date", "due_date")
+    @classmethod
+    def _dates(cls, v):
+        return _iso_date(v)
+
+    @field_validator("currency")
+    @classmethod
+    def _currency(cls, v):
+        if v is None:
+            return None
+        v = v.strip().upper()
+        if len(v) != 3 or not v.isalpha():
+            raise ValueError("expected a 3-letter ISO 4217 code")
+        return v
+
+    @field_validator("total_amount", "subtotal", "tax_amount", "payment_terms_days")
+    @classmethod
+    def _non_negative(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("must be >= 0 (credit notes are not supported)")
+        return v
+
+    @model_validator(mode="after")
+    def _date_order(self):
+        if self.invoice_date and self.due_date and self.due_date < self.invoice_date:
+            raise ValueError("due_date is earlier than invoice_date")
+        return self

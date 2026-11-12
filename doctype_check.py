@@ -1,6 +1,6 @@
-"""Cheap, local check that an upload is the kind of document the uploader said it is.
+"""Cheap, local check that an upload is the kind of document the person said it is.
 
-Runs BEFORE any AI call. It only ever warns; the person can still go ahead.
+Runs BEFORE any AI call and costs nothing. It only ever warns; the person can still go ahead.
 
 How it avoids false alarms
   * A quote that says "NDA required" or "confidentiality agreement" in its requirements must not be
@@ -44,8 +44,8 @@ SIGNALS: dict[str, tuple[list[str], list[str]]] = {
 }
 LABEL = {"legal": "a legal document (NDA / MSA / SOW)", "quote": "a vendor quote", "rfq": "one of our own RFQs",
          "invoice": "an invoice"}
-CHOSEN_LABEL = {"quote": "Vendor quote", "legal": "Legal document"}
-CHECKED_KINDS = {"quote", "legal"}                  # emails are identified by their headers, not by wording
+CHOSEN_LABEL = {"quote": "Vendor quote", "legal": "Legal document", "invoice": "Vendor invoice"}
+CHECKED_KINDS = {"quote", "legal", "invoice"}                  # emails are identified by their headers, not by wording
 
 
 @dataclass
@@ -99,6 +99,6 @@ def check_type(kind: str, path) -> TypeCheck | None:
         return None
     # An evidence word from the title is what a person can verify at a glance
     shown = ", ".join(f"'{e}'" for e in dict.fromkeys(evidence)) or "its wording"
-    note = " Invoices cannot be loaded as quotes." if best == "invoice" else ""
+    note = " Choose 'Vendor invoice' to load it." if best == "invoice" else ""
     return TypeCheck(best, evidence, f"This looks like {LABEL[best]} (found {shown} in the title area), but you chose "
                                      f"'{CHOSEN_LABEL[kind]}'. Check the document type.{note}")

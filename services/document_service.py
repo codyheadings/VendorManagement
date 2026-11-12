@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import db
+import readers
 
 DOCS_DIR = (db.BASE_DIR / "data").resolve()
 
@@ -53,14 +54,14 @@ def show_source(file_name: str, file_path: str, mime_type: str | None):
         elif suffix in IMAGE_TYPES:
             st.image(str(path))
 
-        elif suffix in {".eml", ".txt"}:
-            st.text(path.read_text(errors="replace")[:8000])
-
-        else:
-            st.info(
-                "No inline preview for this file type. "
-                "Use the download button."
-            )
+        else:                                              # docx / xlsx / eml / txt: show the text we read from it
+            try:
+                st.divider()
+                st.caption("(Extracted text)")
+                st.write(readers.read_document(path).text)
+                st.divider()
+            except readers.ReaderError as e:
+                st.warning(f"Cannot show this file: {e}")
 
     except Exception:
         st.warning("Couldn't preview this file. Use the download button.")

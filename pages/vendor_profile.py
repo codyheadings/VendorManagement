@@ -6,6 +6,7 @@ import db
 import sqlite3
 from services.vendor_service import *
 from util import fmt_price
+from services.purchasing_service import vendor_summary
 
 st.set_page_config(
     page_title="Vendor Profile",
@@ -31,7 +32,6 @@ def update_vendor(
 
     try:
         with db.transaction() as conn:
-
             result = conn.execute(
                 """
                 UPDATE vendors
@@ -57,6 +57,8 @@ def update_vendor(
 
             if result.rowcount == 0:
                 raise ValueError("Vendor no longer exists.")
+
+        st.session_state["refresh_insights"] = True
 
     except sqlite3.IntegrityError as e:
         msg = str(e)
@@ -184,7 +186,8 @@ with action_col:
 st.divider()
 
 # Key Information
-col1, col2, _ = st.columns([1,1,2])
+vendor_sum = vendor_summary(vendor_id)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric(
@@ -196,6 +199,12 @@ with col2:
     st.metric(
         label="Country",
         value=vendor["country"] or "Not specified"
+    )
+
+with col4:
+    st.metric(
+        label="Spent on this Vendor",
+        value=f"${vendor_sum["paid"]}"
     )
 
 st.divider()

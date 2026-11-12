@@ -4,7 +4,7 @@ import services.review_service as rv
 
 st.set_page_config(page_title="Review Queue", layout="wide")
 st.title("Review Queue")
-st.caption("Accept and reject pending documents. Nothing the AI extracts counts until a person approves it.")
+st.caption("Accept and reject pending documents. Nothing extracted by AI is released until a person approves it.")
 
 LIST_HEIGHT = 640
 
@@ -140,7 +140,7 @@ def quotes_tab() -> None:
 
             vendors, rfqs = rv.vendors(), rv.rfqs()
             k = f"q{d['id']}"
-            with st.form(f"form_{k}"):
+            with st.form(f"form_{k}", enter_to_submit=False):
                 vendor_ids = [v["id"] for v in vendors]
                 vendor_id = st.selectbox("Vendor", vendor_ids, index=vendor_ids.index(d["vendor_id"]),
                                          format_func=lambda i: next(v["name"] for v in vendors if v["id"] == i), key=f"{k}_vendor")
@@ -196,7 +196,7 @@ def legal_tab() -> None:
                 with st.expander(f"Notes ({len(d['notes'])})", expanded=True):
                     _notes(d["notes"])
             vendors = rv.vendors()
-            with st.form(f"form_{k}"):
+            with st.form(f"form_{k}", enter_to_submit=False):
                 vendor_ids = [v["id"] for v in vendors]
                 vendor_id = st.selectbox("Vendor", vendor_ids, index=vendor_ids.index(d["vendor_id"]),
                                          format_func=lambda i: next(v["name"] for v in vendors if v["id"] == i), key=f"{k}_vendor")
@@ -225,6 +225,63 @@ def legal_tab() -> None:
         _source_preview(d["document_id"])
 
 
+# ---------- Invoices ----------
+
+def invoices_tab() -> None:
+    items = rv.pending_invoices()
+    if not items:
+        st.success("No invoices waiting for review.")
+        return
+    list_col, detail_col, source_col = st.columns([1, 1.5, 1.5])
+    with list_col:
+        picked = _pick(items, "rv_invoice", lambda i: f"{i['vendor_name']}\n{i['invoice_number']} · {i['currency'] or '?'} {i['amount']:,.2f}")
+    if picked is None:
+        return
+    d = rv.invoice_detail(picked["id"])
+    k = f"i{d['id']}"
+    with detail_col:
+        with st.container(height=LIST_HEIGHT, border=True):
+            st.subheader(f"Invoice {d['invoice_number']} · {d['vendor_name']}")
+            for w in d["warnings"]:
+                st.warning(w)
+            usd = f" (about ${d['amount_usd']:,.2f} USD)" if d["amount_usd"] and d["currency"] != "USD" else ""
+            st.metric("Amount", f"{d['currency']} {d['amount']:,.2f}{usd}")
+            st.caption("Approving makes this invoice count as spend. Paying it is recorded separately on the Purchasing page.")
+            if d["notes"]:
+                with st.expander(f"Notes ({len(d['notes'])})", expanded=True):
+                    _notes(d["notes"])
+            vendors = rv.vendors()
+            pos = rv.vendor_pos(d["vendor_id"])
+            with st.form(f"form_{k}"):
+                vendor_ids = [v["id"] for v in vendors]
+                vendor_id = st.selectbox("Vendor", vendor_ids, index=vendor_ids.index(d["vendor_id"]),
+                                         format_func=lambda i: next(v["name"] for v in vendors if v["id"] == i), key=f"{k}_vendor",
+                                         help="If you change the vendor, save first, then pick the purchase order.")
+                po_ids = [None] + [p["id"] for p in pos]
+                po_id = st.selectbox("Purchase order", po_ids, index=po_ids.index(d["po_id"]) if d["po_id"] in po_ids else 0,
+                                     format_func=lambda i: "(none)" if i is None else next(
+                                         f"{p['po_number']} · {p['currency']} {p['amount']:,.2f} ({p['status']})" for p in pos if p["id"] == i),
+                                     key=f"{k}_po")
+                if d["po_reference"]:
+                    st.caption(f"The invoice cites: {d['po_reference']}")
+                c1, c2 = st.columns(2)
+                number = c1.text_input("Invoice number", d["invoice_number"] or "", key=f"{k}_num")
+                currency = c2.text_input("Currency", d["currency"] or "", max_chars=3, key=f"{k}_cur")
+                amount = c1.text_input("Amount", "" if d["amount"] is None else f"{d['amount']:.2f}", key=f"{k}_amt")
+                idate = c2.text_input("Invoice date", d["invoice_date"] or "", placeholder="YYYY-MM-DD", key=f"{k}_idate")
+                due = c1.text_input("Due date", d["due_date"] or "", placeholder="YYYY-MM-DD", key=f"{k}_due")
+                decision, reason = _decision_buttons(k)
+            if decision:
+                result = rv.review_invoice(d["id"], {"vendor_id": vendor_id, "po_id": po_id, "invoice_number": number,
+                                                     "amount": amount, "currency": currency, "invoice_date": idate,
+                                                     "due_date": due}, decision, reason)
+                if result.ok:
+                    _done(result.message, "rv_invoice")
+                _show_errors(result)
+    with source_col:
+        _source_preview(d["document_id"])
+
+
 # ---------- Needs attention ----------
 
 def attention_tab() -> None:
@@ -236,7 +293,7 @@ def attention_tab() -> None:
     vendors = rv.vendors()
     for it in items:
         with st.container(border=True):
-            left, right = st.columns([2, 1])
+            left, right = st.columns([6, 1], gap="medium")
             with left:
                 st.markdown(f"**{it['file_name']}**  ·  {it['doc_type']}")
                 st.badge(it["status"].replace("_", " "), color="red" if it["status"] in ("invalid", "failed") else "orange")
@@ -256,27 +313,30 @@ def attention_tab() -> None:
                     vid = st.selectbox("Assign to vendor", [v["id"] for v in vendors], index=None,
                                        format_func=lambda i: next(v["name"] for v in vendors if v["id"] == i),
                                        key=f"att_v_{it['id']}", placeholder="Choose a vendor")
-                    if st.button("Assign and load", key=f"att_assign_{it['id']}", disabled=vid is None, type="primary"):
+                    if st.button("Assign and load", key=f"att_assign_{it['id']}", disabled=vid is None, type="primary", use_container_width=True):
                         r = rv.assign_vendor(it["id"], vid)
                         _done(r.message) if r.ok else _show_errors(r)
-                if it["status"] == "failed" and st.button("Retry", key=f"att_retry_{it['id']}", type="primary"):
+                if it["status"] == "failed" and st.button("Retry", key=f"att_retry_{it['id']}", type="primary", use_container_width=True):
                     r = rv.retry_apply(it["id"])
                     _done(r.message or "Loaded.") if r.ok else _show_errors(r)
-                if it["status"] == "info_only" and st.button("Mark as handled", key=f"att_done_{it['id']}", type="primary"):
+                if it["status"] == "info_only" and st.button("Mark as handled", key=f"att_done_{it['id']}", type="primary", use_container_width=True):
                     rv.resolve_action(it["id"], "done")
                     _done("Marked as handled.")
                 if st.button("Dismiss", key=f"att_dismiss_{it['id']}",
-                             help="Remove from this list without loading anything. The file stays in Documents."):
+                             help="Remove from this list without loading anything. The file stays in Documents.", use_container_width=True):
                     rv.resolve_action(it["id"], "dismissed")
                     _done("Dismissed.")
 
 
 _flash()
 n = rv.counts()
-tab_q, tab_l, tab_a = st.tabs([f"Quotes ({n['quotes']})", f"Legal documents ({n['legal']})", f"Needs attention ({n['attention']})"])
+tab_q, tab_l, tab_i, tab_a = st.tabs([f"Quotes ({n['quotes']})", f"Legal documents ({n['legal']})",
+                                      f"Invoices ({n['invoices']})", f"Needs attention ({n['attention']})"])
 with tab_q:
     quotes_tab()
 with tab_l:
     legal_tab()
+with tab_i:
+    invoices_tab()
 with tab_a:
     attention_tab()

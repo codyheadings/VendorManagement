@@ -18,6 +18,9 @@ SCHEMA_PATH = BASE_DIR / "db" / "schema.sql"
 # Set date to the given date in README
 TODAY = "2026-10-20"
 
+# disable mail & slack integrations for deployment
+SEND_ENABLED = False
+NOTIFICATIONS_ENABLED = False
 
 def get_conn() -> sqlite3.Connection:
     """Open a short-lived connection with the settings every query needs."""
