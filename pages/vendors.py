@@ -1,7 +1,6 @@
 import streamlit as st
 import db
 import notify
-from services.email_service import send_email
 from services.review_service import attention_items
 from services.rfq_service import *
 from st_helpers.add_vendor_dialog import show_rfq_form

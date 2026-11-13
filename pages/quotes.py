@@ -1,5 +1,4 @@
 import streamlit as st
-from pathlib import Path
 import db
 from services.document_service import show_source
 from util import fmt_price

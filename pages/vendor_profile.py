@@ -5,6 +5,7 @@ from services.vendor_service import *
 from st_helpers.vendor_profile_dialogs import *
 from util import fmt_price
 from services.purchasing_service import vendor_summary
+import st_helpers.vendor_money
 
 st.set_page_config(
     page_title="Vendor Profile",
@@ -56,35 +57,20 @@ with action_col:
 st.divider()
 
 # Key Information
-vendor_sum = vendor_summary(vendor_id)
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric(
-        label="Category",
-        value=vendor["category"] or "Not specified"
-    )
-
-with col2:
-    st.metric(
-        label="Country",
-        value=vendor["country"] or "Not specified"
-    )
-
-with col4:
-    st.metric(
-        label="Spent on this Vendor",
-        value=f"${vendor_sum["paid"]}"
-    )
-
+summary = st_helpers.vendor_money.header_metrics(vendor)
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Overview",
     "Quotes",
     "Contacts",
-    "Documents"
+    "Purchase orders",
+    "Invoices",
+    "Spend history",
+    "Documents",
 ])
+
+st_helpers.vendor_money.section(summary, tab4, tab5, tab6)
 
 # Overview
 with tab1:
@@ -549,8 +535,7 @@ def render_vendor_documents(documents, key_prefix="vendor"):
                         st.caption("No file")
 
 # Documents
-with tab4:
-
+with tab7:
     st.subheader("Vendor Documents")
 
     st.caption(
