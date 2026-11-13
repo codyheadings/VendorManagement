@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS vendor_contacts (
 ) STRICT;
 
 -- At most one primary contact per vendor
-CREATE UNIQUE INDEX idx_one_primary_contact
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_primary_contact
   ON vendor_contacts(vendor_id) WHERE is_primary = 1;
 
 
@@ -227,8 +227,8 @@ CREATE TABLE IF NOT EXISTS rfq_messages (
   occurred_on TEXT NOT NULL CHECK (date(occurred_on) = occurred_on),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
-CREATE UNIQUE INDEX idx_rfq_messages_doc ON rfq_messages(rfq_id, document_id) WHERE document_id IS NOT NULL;
-CREATE INDEX idx_rfq_messages_rfq ON rfq_messages(rfq_id, occurred_on);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rfq_messages_doc ON rfq_messages(rfq_id, document_id) WHERE document_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_rfq_messages_rfq ON rfq_messages(rfq_id, occurred_on);
 
 -- ---------- Vendor hub ----------
 
@@ -297,20 +297,20 @@ WHERE q.review_status != 'rejected'
 
 -- ---------- Indexes on foreign keys ----------
 
-CREATE INDEX idx_documents_vendor           ON documents(vendor_id);
-CREATE INDEX idx_invitations_vendor         ON rfq_invitations(vendor_id);
-CREATE INDEX idx_quotes_vendor              ON quotes(vendor_id);
-CREATE INDEX idx_quotes_rfq                 ON quotes(rfq_id);
-CREATE INDEX idx_rfq_vendor                 ON rfqs(awarded_vendor_id);
-CREATE INDEX idx_rfq_items_rfq_id           ON rfq_items(rfq_id);
-CREATE INDEX idx_rfq_invitations_rfq_id     ON rfq_invitations(rfq_id);
-CREATE INDEX idx_rfq_invitations_vendor_id  ON rfq_invitations(vendor_id);
-CREATE INDEX idx_quotes_supersedes          ON quotes(supersedes_quote_id);
-CREATE INDEX idx_line_items_quote           ON quote_line_items(quote_id);
-CREATE INDEX idx_tiers_quote                ON quote_price_tiers(quote_id);
-CREATE INDEX idx_extractions_status         ON extractions(status);
-CREATE INDEX idx_legal_vendor               ON legal_documents(vendor_id);
-CREATE INDEX idx_legal_expiry               ON legal_documents(expiry_date);
-CREATE INDEX idx_po_vendor                  ON purchase_orders(vendor_id);
-CREATE INDEX idx_invoices_vendor            ON invoices(vendor_id);
-CREATE INDEX idx_invoices_po                ON invoices(po_id);
+CREATE INDEX IF NOT EXISTS idx_documents_vendor           ON documents(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_invitations_vendor         ON rfq_invitations(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_vendor              ON quotes(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_rfq                 ON quotes(rfq_id);
+CREATE INDEX IF NOT EXISTS idx_rfq_vendor                 ON rfqs(awarded_vendor_id);
+CREATE INDEX IF NOT EXISTS idx_rfq_items_rfq_id           ON rfq_items(rfq_id);
+CREATE INDEX IF NOT EXISTS idx_rfq_invitations_rfq_id     ON rfq_invitations(rfq_id);
+CREATE INDEX IF NOT EXISTS idx_rfq_invitations_vendor_id  ON rfq_invitations(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_supersedes          ON quotes(supersedes_quote_id);
+CREATE INDEX IF NOT EXISTS idx_line_items_quote           ON quote_line_items(quote_id);
+CREATE INDEX IF NOT EXISTS idx_tiers_quote                ON quote_price_tiers(quote_id);
+CREATE INDEX IF NOT EXISTS idx_extractions_status         ON extractions(status);
+CREATE INDEX IF NOT EXISTS idx_legal_vendor               ON legal_documents(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_legal_expiry               ON legal_documents(expiry_date);
+CREATE INDEX IF NOT EXISTS idx_po_vendor                  ON purchase_orders(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_vendor            ON invoices(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_po                ON invoices(po_id);
