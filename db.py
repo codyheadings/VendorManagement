@@ -90,8 +90,26 @@ def missing_tables() -> list[str]:
     finally:
         conn.close()
     return [t for t in wanted if t not in have]
-
-
+ 
+ 
+def find_bad_statement(sql: str) -> str:
+    """Run schema.sql one statement at a time and name the first one SQLite rejects (with its line number)."""
+    conn = sqlite3.connect(":memory:")
+    buf, start = "", 1
+    for n, line in enumerate(sql.splitlines(), 1):
+        if not buf.strip():
+            start = n
+        buf += line + "\n"
+        if sqlite3.complete_statement(buf):
+            try:
+                conn.execute(buf)
+            except sqlite3.Error as e:
+                head = " ".join(buf.split())[:80]
+                return f"line {start}-{n}: {e} -> {head}"
+            buf = ""
+    return "could not isolate the statement"
+ 
+ 
 def init_db(reset: bool = False) -> None:
     """Build the whole schema in a temporary file, then swap it in.
  
@@ -108,7 +126,8 @@ def init_db(reset: bool = False) -> None:
     except Exception as e:
         conn.close()
         building.unlink(missing_ok=True)
-        raise RuntimeError(f"schema.sql failed on SQLite {sqlite3.sqlite_version}: {e}") from e
+        raise RuntimeError(f"schema.sql failed on SQLite {sqlite3.sqlite_version}: {e}. "
+                           f"First bad statement: {find_bad_statement(SCHEMA_PATH.read_text(encoding='utf-8'))}") from e
     conn.close()
     if DB_PATH.exists():
         os.replace(DB_PATH, DB_PATH.with_name(DB_PATH.name + ".bak"))
