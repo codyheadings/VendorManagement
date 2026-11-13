@@ -1,5 +1,8 @@
 import streamlit as st
 from services.document_service import *
+import db
+
+db.ensure_db()
 
 st.set_page_config(
     page_title="Documents",

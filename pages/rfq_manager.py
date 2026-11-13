@@ -11,6 +11,7 @@ from services.email_service import send_email, build_simple_msg
 import services.purchasing_service as ps
 from st_helpers.po_dialog import show_create_po_dialog
 
+db.ensure_db()
 st.set_page_config(page_title="RFQ Manager", layout="wide")
 st.title("RFQ Manager")
 st.caption("Track every request for quotation: who replied, who is late, follow-ups and the quote comparison.")

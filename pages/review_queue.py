@@ -1,7 +1,9 @@
 import streamlit as st
 import extraction.readers as readers
 import services.review_service as rv
+import db
 
+db.ensure_db()
 st.set_page_config(page_title="Review Queue", layout="wide")
 st.title("Review Queue")
 st.caption("Accept and reject pending documents. Nothing extracted by AI is released until a person approves it.")

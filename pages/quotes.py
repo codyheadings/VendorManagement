@@ -3,6 +3,8 @@ import db
 from services.document_service import show_source
 from util import fmt_price
 
+db.ensure_db()
+
 st.set_page_config(
     page_title="Quotes",
     layout="wide"

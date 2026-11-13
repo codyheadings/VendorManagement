@@ -3,12 +3,6 @@ from pathlib import Path
 from contextlib import contextmanager
 
 """SQLite helpers for the vendor platform.
-
-Usage:
-    import db
-    db.ensure_db()                                  # once at app start
-    vendors = db.query("SELECT * FROM vendors WHERE status = ?", ("active",))
-    vendor_id = db.execute("INSERT INTO vendors (name, normalized_name) VALUES (?, ?)", (n, nn))
 """
 
 BASE_DIR = Path(__file__).parent

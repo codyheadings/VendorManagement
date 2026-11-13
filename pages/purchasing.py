@@ -4,6 +4,7 @@ import db
 import services.purchasing_service as ps
 from st_helpers.po_dialog import show_create_po_dialog
 
+db.ensure_db()
 st.set_page_config(page_title="Purchasing", layout="wide")
 st.title("Purchasing")
 st.caption("Purchase orders, invoices and amount spent. Amounts are shown in USD where converted. "

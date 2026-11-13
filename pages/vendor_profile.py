@@ -7,6 +7,7 @@ from util import fmt_price
 from services.purchasing_service import vendor_summary
 import st_helpers.vendor_money
 
+db.ensure_db()
 st.set_page_config(
     page_title="Vendor Profile",
     layout="wide"
