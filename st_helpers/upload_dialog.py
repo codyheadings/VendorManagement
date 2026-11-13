@@ -71,6 +71,14 @@ def show_upload_dialog():
             st.table({label_: value for label_, value in pre.rows})
         for w in pre.warnings:
             st.warning(w)
+        replace_confirmed = True
+
+        if pre.replacing:
+            replace_confirmed = st.checkbox(
+                "I understand that the previous extraction and "
+                "its rejected record will be replaced.",
+                key=f"replace_ok_{kind}_{source_id}",
+            )
         if not pre.ok:
             st.error("Nothing will be added." if pre.already_loaded else "This file cannot be added as it is.")
             return
@@ -81,11 +89,22 @@ def show_upload_dialog():
             confirmed = st.checkbox("I checked: this is the right document type", key=f"upload_ok_{kind}_{source_id}")
         if pre.needs_ai:
             st.caption("This document will be extracted by artificial intelligence. Results are saved as pending until you approve them.")
-        if st.button("Extract and add for review" if pre.needs_ai else "Confirm and add", type="primary",
-                     use_container_width=True, key=f"upload_go_{kind}", disabled=not confirmed):
+        if st.button(
+            "Extract and add for review" if pre.needs_ai else "Confirm and add",
+            type="primary",
+            use_container_width=True,
+            key=f"upload_go_{kind}",
+            disabled=not confirmed or not replace_confirmed,
+        ):
             with st.spinner("Working..."):
                 try:
-                    state["result"] = up.commit(kind, state["path"], allow_ai=pre.needs_ai, type_confirmed=confirmed)
+                    state["result"] = up.commit(
+                        kind,
+                        state["path"],
+                        allow_ai=pre.needs_ai,
+                        type_confirmed=confirmed,
+                        replace_existing=pre.replacing,
+                    )
 
                     st.session_state["refresh_insights"] = True
                     

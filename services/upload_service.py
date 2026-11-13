@@ -52,6 +52,7 @@ class Preview:
     needs_ai: bool = False
     already_loaded: bool = False
     type_warning: str | None = None
+    replacing: bool = False
 
 
 def save_upload(name: str, data: bytes, kind: str) -> Path:
@@ -165,22 +166,98 @@ def _rfq_preview(path: Path) -> Preview:
     return Preview(not exists, d["number"], rows, warnings, already_loaded=exists)
 
 
+def _replacement_info(sha: str) -> tuple[bool, str | None]:
+    existing = db.query_one(
+        """
+        SELECT id
+        FROM documents
+        WHERE sha256 = ?
+        """,
+        (sha,),
+    )
+
+    if existing is None:
+        return False, None
+
+    with db.transaction() as conn:
+        reason = loader.replacement_reason(
+            conn,
+            existing["id"],
+        )
+
+    return reason is not None, reason
+
+
 def _ai_preview(kind: str, path: Path) -> Preview:
     sha = extract.file_sha256(path)
+
     existing = db.query_one(
-        "SELECT e.status FROM documents d JOIN extractions e ON e.document_id = d.id WHERE d.sha256 = ?", (sha,))
+        "SELECT id FROM documents WHERE sha256 = ?",
+        (sha,),
+    )
+
+    replacing = False
+    reason = None
+
     if existing:
-        return Preview(False, path.name, [("Status", f"already loaded ({existing['status']})")],
-                       ["This exact file was already uploaded."], already_loaded=True)
-    ctx = extract.RunContext(live=False, max_calls=0, force_type=kind)
+        replacing, reason = _replacement_info(sha)
+
+        if not replacing:
+            return Preview(
+                False,
+                path.name,
+                [("Status", "Already uploaded")],
+                [
+                    "This exact file has already been uploaded "
+                    "and cannot be replaced automatically."
+                ],
+                already_loaded=True,
+            )
+
+    ctx = extract.RunContext(
+        live=False,
+        max_calls=0,
+        force_type=kind,
+    )
     res = extract.process_file(path, ctx)
-    cached = res.status != "dry-run"
+
     if res.status == "error":
         return Preview(False, path.name, warnings=[res.message])
-    rows = [("File", path.name), ("Type", kind), ("Extraction", "cached, free" if cached else "will be extracted by AI")]
+
+    cached = res.from_cache
+
+    rows = [
+        ("File", path.name),
+        ("Type", kind),
+        (
+            "Extraction",
+            "fresh extraction (replacing previous result)"
+            if replacing
+            else "cached, does not require AI" if cached
+            else "will be extracted by AI",
+        ),
+    ]
+
+    warnings = list(res.notes or [])
+
+    if replacing:
+        warnings.insert(
+            0,
+            f"{reason} Re-uploading will replace the previous "
+            "extraction and, if applicable, its rejected document."
+        )
+
     check = doctype_check.check_type(kind, path)
-    return Preview(True, path.name, rows, list(res.notes or []), needs_ai=not cached,
-                   type_warning=check.message if check else None)
+
+    return Preview(
+        True,
+        path.name,
+        rows,
+        warnings,
+        needs_ai=replacing or not cached,
+        type_warning=check.message if check else None,
+        replacing=replacing,
+    )
 
 
 def preview(kind: str, path: Path) -> Preview:
@@ -194,22 +271,37 @@ def preview(kind: str, path: Path) -> Preview:
     raise UploadError(f"unknown upload type {kind!r}")
 
 
-def commit(kind: str, path: Path, allow_ai: bool = False, client=None,
-           type_confirmed: bool = False) -> loader.Outcome | seed.ImportReport:
-    """Commit it. AI is used only when allow_ai is set (the person pressed the button).
- 
-    A file that looks like the wrong kind is refused until type_confirmed is set, so the check cannot be
-    skipped by the screen and no API call is made for it."""
+def commit(
+    kind: str,
+    path: Path,
+    allow_ai: bool = False,
+    client=None,
+    type_confirmed: bool = False,
+    replace_existing: bool = False,
+) -> loader.Outcome | seed.ImportReport:
+
     if kind in doctype_check.CHECKED_KINDS and not type_confirmed:
         check = doctype_check.check_type(kind, path)
         if check:
             raise UploadError(check.message)
+
     if kind == "vendors":
         with db.transaction() as conn:
             return seed.seed_vendors_from_csv(conn, path)
+
     if kind == "rfq":
         return rfq_import.import_rfq(path)
+
     if kind in AI_KINDS:
-        ctx = extract.RunContext(live=allow_ai, max_calls=1, force_type=kind, client=client)
+        ctx = extract.RunContext(
+            live=allow_ai,
+            max_calls=1,
+            force_type=kind,
+            client=client,
+            retry_invalid=replace_existing,
+            refresh_cache=replace_existing,
+        )
+
         return loader.ingest(path, ctx)
+
     raise UploadError(f"unknown upload type {kind!r}")

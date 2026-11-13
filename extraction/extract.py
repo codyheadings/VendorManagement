@@ -323,6 +323,7 @@ class RunContext:
     max_calls: int = 5
     force_type: str | None = None
     retry_invalid: bool = False
+    refresh_cache: bool = False
     client: object | None = None
     calls: int = 0
     input_tokens: int = 0
@@ -394,15 +395,26 @@ def process_file(path: Path, ctx: RunContext) -> Result:
 
     # --- cache lookup ---
     key = cache_key(file_sha256(path), doc_type, MODEL)
-    cached = _find_cache(key)
-    if cached:
-        try:
-            record = json.loads(cached.read_text(encoding="utf-8"))
-            if record["status"] == "ok" or not ctx.retry_invalid:
-                res.from_cache, res.data, res.errors = True, record["data"], record.get("errors", [])
-                return res.finish(record["status"], f"cached ({cached.name})")
-        except (OSError, ValueError, KeyError):
-            pass  # unreadable cache entry: treat as a miss
+
+    if not ctx.refresh_cache:
+        cached = _find_cache(key)
+
+        if cached:
+            try:
+                record = json.loads(cached.read_text(encoding="utf-8"))
+
+                if record["status"] == "ok" or not ctx.retry_invalid:
+                    res.from_cache = True
+                    res.data = record["data"]
+                    res.errors = record.get("errors", [])
+
+                    return res.finish(
+                        record["status"],
+                        f"cached ({cached.name})",
+                    )
+
+            except (OSError, ValueError, KeyError):
+                pass  # Unreadable cache entry: treat as a miss
 
     if res.est_tokens > MAX_INPUT_TOKENS:
         return res.finish("skipped", f"~{res.est_tokens:,} tokens exceeds the {MAX_INPUT_TOKENS:,} limit")

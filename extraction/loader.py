@@ -564,6 +564,174 @@ def apply_extraction(extraction_id: int, vendor_id: int | None = None) -> Outcom
         return Outcome(None, "failed", detail, extraction_id=extraction_id)
 
 
+def replacement_reason(conn, doc_id: int) -> str | None:
+    """
+    A document can be replaced if:
+    - Its extraction is invalid or dismissed and has no business records.
+    - OR it has exactly one rejected quote, legal document, or invoice.
+
+    Never replace records that other business records depend on.
+    """
+    ext = conn.execute(
+        """
+        SELECT id, status, action_status
+        FROM extractions
+        WHERE document_id = ?
+        """,
+        (doc_id,),
+    ).fetchone()
+
+    records = []
+
+    for table, kind in (
+        ("quotes", "quote"),
+        ("legal_documents", "legal document"),
+        ("invoices", "invoice"),
+    ):
+        rows = conn.execute(
+            f"""
+            SELECT id, review_status
+            FROM {table}
+            WHERE document_id = ?
+            """,
+            (doc_id,),
+        ).fetchall()
+
+        for row in rows:
+            records.append((kind, row["id"], row["review_status"]))
+
+    # Other references to this source file must be protected.
+    other_links = conn.execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM rfqs WHERE document_id = ?) +
+            (SELECT COUNT(*) FROM rfq_messages WHERE document_id = ?)
+            AS total
+        """,
+        (doc_id, doc_id),
+    ).fetchone()
+
+    if other_links["total"]:
+        return None
+
+    if not records:
+        if ext is None:
+            return "The document has no previous extraction."
+
+        if ext["status"] == "invalid":
+            return "The previous extraction was invalid."
+
+        if ext["action_status"] == "dismissed":
+            return "The previous extraction was dismissed."
+
+        return None
+
+    # Only one generated business record, and it must be rejected.
+    if len(records) != 1:
+        return None
+
+    kind, record_id, review_status = records[0]
+
+    if review_status != "rejected" or ext is None:
+        return None
+
+    if kind == "quote":
+        dependencies = conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM quotes
+                 WHERE supersedes_quote_id = ?) +
+                (SELECT COUNT(*) FROM purchase_orders
+                 WHERE quote_id = ?)
+                AS total
+            """,
+            (record_id, record_id),
+        ).fetchone()
+
+        if dependencies["total"]:
+            return None
+
+    elif kind == "legal document":
+        # Prevent deletion of an agreement used as another
+        # legal document's parent agreement.
+        dependencies = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM legal_documents
+            WHERE parent_id = ?
+            """,
+            (record_id,),
+        ).fetchone()
+
+        if dependencies["total"]:
+            return None
+
+    return f"The previous {kind} was rejected."
+
+
+def _remove_replaceable_extraction(conn, doc_id: int) -> None:
+    """
+    Remove the previous extraction and its rejected business record.
+    Must be called inside an existing database transaction.
+    """
+    reason = replacement_reason(conn, doc_id)
+
+    if reason is None:
+        raise ValueError(
+            "Cannot replace this document: it is not rejected, "
+            "or it has dependent records."
+        )
+
+    quote = conn.execute(
+        "SELECT id FROM quotes WHERE document_id = ?",
+        (doc_id,),
+    ).fetchone()
+
+    legal = conn.execute(
+        "SELECT id FROM legal_documents WHERE document_id = ?",
+        (doc_id,),
+    ).fetchone()
+
+    invoice = conn.execute(
+        "SELECT id FROM invoices WHERE document_id = ?",
+        (doc_id,),
+    ).fetchone()
+
+    if quote:
+        quote_id = quote["id"]
+
+        # Delete dependent rows explicitly.
+        conn.execute(
+            "DELETE FROM quote_line_items WHERE quote_id = ?",
+            (quote_id,),
+        )
+        conn.execute(
+            "DELETE FROM quote_price_tiers WHERE quote_id = ?",
+            (quote_id,),
+        )
+        conn.execute(
+            "DELETE FROM quotes WHERE id = ?",
+            (quote_id,),
+        )
+
+    if legal:
+        conn.execute(
+            "DELETE FROM legal_documents WHERE id = ?",
+            (legal["id"],),
+        )
+
+    if invoice:
+        conn.execute(
+            "DELETE FROM invoices WHERE id = ?",
+            (invoice["id"],),
+        )
+
+    conn.execute(
+        "DELETE FROM extractions WHERE document_id = ?",
+        (doc_id,),
+    )
+
+
 # ---------- Phase 1: register ----------
 
 def _register(path: Path, sha: str, category: str, source: str, ext_row: dict | None,
@@ -581,7 +749,7 @@ def _register(path: Path, sha: str, category: str, source: str, ext_row: dict | 
         ext_id = None
         if ext_row:
             if replace:
-                conn.execute("DELETE FROM extractions WHERE document_id = ? AND status = 'invalid'", (doc_id,))
+                _remove_replaceable_extraction(conn, doc_id)
             ext_id = conn.execute(
                 """INSERT INTO extractions (document_id, doc_type, model, schema_version, validity, data_json,
                        errors_json, status, status_detail) VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -600,16 +768,35 @@ def ingest(path: Path, ctx: extract.RunContext) -> Outcome:
     sha = extract.file_sha256(path)
 
     existing = db.query_one(
-        """SELECT d.id AS document_id, e.id AS extraction_id, e.status FROM documents d
-           LEFT JOIN extractions e ON e.document_id = d.id WHERE d.sha256 = ?""", (sha,))
+        """
+        SELECT d.id AS document_id,
+            e.id AS extraction_id,
+            e.status
+        FROM documents d
+        LEFT JOIN extractions e ON e.document_id = d.id
+        WHERE d.sha256 = ?
+        """,
+        (sha,),
+    )
+
     replace = False
+
     if existing and existing["extraction_id"]:
-        if existing["status"] == "invalid" and ctx.retry_invalid:
-            replace = True                      # re-extract; the old failed result is replaced
+        doc_id = existing["document_id"]
+
+        with db.transaction() as conn:
+            reason = replacement_reason(conn, doc_id)
+
+        if reason is not None and ctx.retry_invalid:
+            replace = True
         else:
-            hint = " (use --retry-invalid to extract it again)" if existing["status"] == "invalid" else ""
-            return Outcome(path, "duplicate", f"already ingested (status: {existing['status']}){hint}",
-                           existing["document_id"], existing["extraction_id"])
+            return Outcome(
+                path,
+                "duplicate",
+                f"already ingested (status: {existing['status']})",
+                existing["document_id"],
+                existing["extraction_id"],
+            )
 
     res = extract.process_file(path, ctx)      # cache first; calls the API only when allowed
 
