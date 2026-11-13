@@ -72,13 +72,27 @@ def execute_many(sql: str, rows: list[tuple]) -> None:
 
 
 def init_db(reset: bool = False) -> None:
-    """Create all tables from schema.sql. reset=True deletes the DB file first."""
     if reset and DB_PATH.exists():
         DB_PATH.unlink()
+
+    print(f"Initializing database at: {DB_PATH.resolve()}")
+    print(f"Using schema: {SCHEMA_PATH.resolve()}")
+
     conn = get_conn()
     try:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
+
+        tables = conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+            ORDER BY name
+            """
+        ).fetchall()
+
+        print("Created tables:", [r[0] for r in tables])
+
     finally:
         conn.close()
 
