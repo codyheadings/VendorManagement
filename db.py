@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
+import os
+import re
 
 """SQLite helpers for the vendor platform.
 """
@@ -71,42 +73,53 @@ def execute_many(sql: str, rows: list[tuple]) -> None:
         conn.executemany(sql, rows)
 
 
+def schema_tables() -> list[str]:
+    """Table names declared in schema.sql, so the check below never goes out of date."""
+    return re.findall(r"^\s*CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)", SCHEMA_PATH.read_text(encoding="utf-8"),
+                      re.I | re.M)
+ 
+ 
+def missing_tables() -> list[str]:
+    """Tables schema.sql defines that the database does not have (all of them if there is no file)."""
+    wanted = schema_tables()
+    if not DB_PATH.exists():
+        return wanted
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        conn.close()
+    return [t for t in wanted if t not in have]
+
+
 def init_db(reset: bool = False) -> None:
-    if reset and DB_PATH.exists():
-        DB_PATH.unlink()
-
-    print(f"Initializing database at: {DB_PATH.resolve()}")
-    print(f"Using schema: {SCHEMA_PATH.resolve()}")
-
-    conn = get_conn()
+    """Build the whole schema in a temporary file, then swap it in.
+ 
+    A failure part-way leaves the old file alone instead of a database with only the first
+    few tables. A replaced file is kept next to it as <name>.bak.
+    """
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    building = DB_PATH.with_name(DB_PATH.name + ".building")
+    building.unlink(missing_ok=True)
+    conn = sqlite3.connect(building)
     try:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
-
-        tables = conn.execute(
-            """
-            SELECT name FROM sqlite_master
-            WHERE type = 'table'
-            ORDER BY name
-            """
-        ).fetchall()
-
-        print("Created tables:", [r[0] for r in tables])
-
-    finally:
+    except Exception as e:
         conn.close()
-
-
+        building.unlink(missing_ok=True)
+        raise RuntimeError(f"schema.sql failed on SQLite {sqlite3.sqlite_version}: {e}") from e
+    conn.close()
+    if DB_PATH.exists():
+        os.replace(DB_PATH, DB_PATH.with_name(DB_PATH.name + ".bak"))
+    os.replace(building, DB_PATH)
+ 
+ 
 def is_initialized() -> bool:
-    """True if the DB file exists and has at least one user table."""
-    if not DB_PATH.exists():
-        return False
-    row = query_one(
-        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-    )
-    return bool(row and row["n"] > 0)
-
-
+    """True only if every table in schema.sql exists (one table is not enough)."""
+    return not missing_tables()
+ 
+ 
 def ensure_db() -> None:
     """Build the schema if the DB is missing."""
     if is_initialized():
