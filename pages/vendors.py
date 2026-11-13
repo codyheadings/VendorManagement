@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import streamlit as st
 import db
 import notify
@@ -18,7 +20,22 @@ notify.run_if_due()
 # Main page content
 st.markdown("# Vendor Overview")
 st.caption("View and manage your vendors.")
-        
+
+defaults = {
+    "rfq_id": "RFQ-2026-016",
+    "rfq_subtitle": "",
+    "issued_date": datetime.strptime(db.TODAY, "%Y-%m-%d").date(),
+    "rfq_deadline": datetime.strptime(db.TODAY, "%Y-%m-%d").date(),
+    "rfq_contact": "sourcing@oddity-labs.example",
+    "deliver_to": "ODDITY Labs, Boston, MA, USA",
+    "rfq_items": [],
+    "specifications": [],
+    "quote_requirements": [],
+}
+
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 def update_vendor_selection(vendor_id):
     checkbox_key = f"select_vendor_{vendor_id}"

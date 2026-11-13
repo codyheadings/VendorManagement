@@ -19,7 +19,7 @@ def _show_result(result) -> None:
         st.info("This needs a person. It is listed in the review queue.")
 
 
-@st.dialog("Upload files", width=1440)
+@st.dialog("Upload files", width=1440, on_dismiss="rerun")
 def show_upload_dialog():
     left, right = st.columns(2)
 
