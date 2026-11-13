@@ -123,27 +123,11 @@ def generate_preview(pdf_data):
     pdf_buffer.seek(0)
     return pdf_buffer
 
-defaults = {
-    "rfq_id": "RFQ-2026-016",
-    "rfq_subtitle": "",
-    "issued_date": datetime.strptime(db.TODAY, "%Y-%m-%d").date(),
-    "rfq_deadline": datetime.strptime(db.TODAY, "%Y-%m-%d").date(),
-    "rfq_contact": "sourcing@oddity-labs.example",
-    "deliver_to": "ODDITY Labs, Boston, MA, USA",
-    "rfq_items": [],
-    "specifications": [],
-    "quote_requirements": [],
-}
-
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
-
 @st.dialog("Request a Quote", width="large")
 def show_rfq_form():
-    initialize_dynamic_list("rfq_items", defaults["rfq_items"])
-    initialize_dynamic_list("specifications", defaults["specifications"])
-    initialize_dynamic_list("quote_requirements", defaults["quote_requirements"])
+    initialize_dynamic_list("rfq_items", [])
+    initialize_dynamic_list("specifications", [])
+    initialize_dynamic_list("quote_requirements", [])
 
     request_col, pdf_col = st.columns(2)
 
