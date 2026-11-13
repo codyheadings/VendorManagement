@@ -57,7 +57,7 @@ CREATE TABLE rfqs (
   due_date TEXT CHECK (due_date IS NULL OR date(due_date) = due_date),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'open', 'closed', 'cancelled')),
   awarded_vendor_id INTEGER REFERENCES vendors(id),  -- vendor whose quote was accepted
-  created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (due_date IS NULL OR due_date >= issue_date),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (due_date IS NULL OR due_date >= issue_date)
 ) STRICT;
 
 CREATE TABLE rfq_items (
