@@ -187,6 +187,11 @@ def get_documents(category=None, search="", sort="Date", order="Descending"):
              WHERE l.document_id = d.id
              LIMIT 1) AS legal_status,
 
+            (SELECT l.signer
+             FROM legal_documents l
+             WHERE l.document_id = d.id
+             LIMIT 1) AS signer,
+
             (SELECT l.review_status
              FROM legal_documents l
              WHERE l.document_id = d.id

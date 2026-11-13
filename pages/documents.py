@@ -50,7 +50,14 @@ def render_documents(documents, key_prefix="all"):
 
                 # Reference / details
                 reference, status = get_document_details(doc)
-                cols[2].write(reference)
+                if doc["category"] == "legal" and status in ("draft", "sent"):
+                    cols[2].write(f"{reference} - Unsigned")
+                elif doc["category"] == "legal" and status == "signed":
+                    cols[2].write(f"{reference} - Signed by {doc["signer"] or 'Unknown'}")
+                elif doc["category"] == "legal":
+                    cols[2].write(f"{reference} - Sign status unknown")
+                else:
+                    cols[2].write(reference)
 
                 if doc["category"] == "rfq" and doc["rfq_due_date"]:
                     cols[2].caption(
