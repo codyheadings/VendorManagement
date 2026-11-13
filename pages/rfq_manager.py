@@ -32,6 +32,7 @@ STATUS_COLOR = {"draft": "gray", "open": "green", "closed": "blue", "cancelled":
 
 def _flash() -> None:
     msg = st.session_state.pop("rm_flash", None)
+    st.session_state["refresh_insights"] = True
     if msg:
         st.toast(msg)
 

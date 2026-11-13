@@ -17,6 +17,7 @@ COLOR = {"open": "orange", "received": "blue", "closed": "green", "cancelled": "
 
 def _flash() -> None:
     msg = st.session_state.pop("purchasing_flash", None)
+    st.session_state["refresh_insights"] = True
     if msg:
         st.toast(msg)
 

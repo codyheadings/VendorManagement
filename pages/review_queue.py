@@ -16,6 +16,7 @@ LIST_HEIGHT = 640
 def _flash() -> None:
     """Show the result of the previous action (set just before st.rerun())."""
     msg = st.session_state.pop("review_flash", None)
+    st.session_state["refresh_insights"] = True
     if msg:
         st.toast(msg)
 
