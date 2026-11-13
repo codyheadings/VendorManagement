@@ -95,8 +95,8 @@ def is_initialized() -> bool:
 
 def ensure_db() -> None:
     """Build the schema if the DB is missing."""
-    # if is_initialized():
-    #     return
+    if is_initialized():
+        return
     init_db()
 
 

@@ -1,6 +1,6 @@
 -- ---------- Vendors ----------
 
-CREATE TABLE IF NOT EXISTS vendors (
+CREATE TABLE vendors (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   normalized_name TEXT NOT NULL UNIQUE,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS vendors (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS vendor_contacts (
+CREATE TABLE vendor_contacts (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -24,13 +24,13 @@ CREATE TABLE IF NOT EXISTS vendor_contacts (
 ) STRICT;
 
 -- At most one primary contact per vendor
-CREATE UNIQUE INDEX IF NOT EXISTS idx_one_primary_contact
+CREATE UNIQUE INDEX idx_one_primary_contact
   ON vendor_contacts(vendor_id) WHERE is_primary = 1;
 
 
 -- ---------- Documents ----------
 
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE documents (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER REFERENCES vendors(id),
   file_name TEXT NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
 -- ---------- RFQs ----------
 
-CREATE TABLE IF NOT EXISTS rfqs (
+CREATE TABLE rfqs (
   id INTEGER PRIMARY KEY,
   rfq_number TEXT NOT NULL UNIQUE,
   document_id INTEGER REFERENCES documents(id),   -- source file, if any
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS rfqs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (due_date IS NULL OR due_date >= issue_date),
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS rfq_items (
+CREATE TABLE rfq_items (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   line_number INTEGER NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS rfq_items (
   UNIQUE (rfq_id, line_number)
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS rfq_specifications (
+CREATE TABLE rfq_specifications (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   line_number INTEGER NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS rfq_specifications (
   UNIQUE (rfq_id, line_number)
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS rfq_quote_requirements (
+CREATE TABLE rfq_quote_requirements (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   line_number INTEGER NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS rfq_quote_requirements (
   UNIQUE (rfq_id, line_number)
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS rfq_invitations (
+CREATE TABLE rfq_invitations (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS rfq_invitations (
 
 -- ---------- Quotes ----------
 
-CREATE TABLE IF NOT EXISTS quotes (
+CREATE TABLE quotes (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   rfq_id INTEGER REFERENCES rfqs(id),
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS quotes (
   CHECK (valid_until IS NULL OR quote_date IS NULL OR valid_until >= quote_date)
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS quote_line_items (
+CREATE TABLE quote_line_items (
   id INTEGER PRIMARY KEY,
   quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
   description TEXT NOT NULL,              -- original language
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS quote_line_items (
 
 
 -- Quantity-dependent price tables ("500 g - 999 g: 36000 per kg"), kept as quoted.
-CREATE TABLE IF NOT EXISTS quote_price_tiers (
+CREATE TABLE quote_price_tiers (
   id INTEGER PRIMARY KEY,
   quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
   min_quantity REAL CHECK (min_quantity >= 0),
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS quote_price_tiers (
 
 -- ---------- Legal documents ----------
 
-CREATE TABLE IF NOT EXISTS legal_documents (
+CREATE TABLE legal_documents (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   document_id INTEGER REFERENCES documents(id),
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS legal_documents (
 -- One row per doc. Keeps the raw result (including FAILED ones, so nothing silently
 -- disappears), and carries emails that create no record (questions, notices) as open actions.
 
-CREATE TABLE IF NOT EXISTS extractions (
+CREATE TABLE extractions (
   id INTEGER PRIMARY KEY,
   document_id INTEGER NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
   doc_type TEXT NOT NULL CHECK (doc_type IN ('quote','legal','email','invoice','other')),
@@ -214,7 +214,7 @@ CREATE TABLE IF NOT EXISTS extractions (
 
 -- ---------- RFQ history: follow-ups, vendor questions, notes ----------
 
-CREATE TABLE IF NOT EXISTS rfq_messages (
+CREATE TABLE rfq_messages (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   vendor_id INTEGER REFERENCES vendors(id),
@@ -227,12 +227,12 @@ CREATE TABLE IF NOT EXISTS rfq_messages (
   occurred_on TEXT NOT NULL CHECK (date(occurred_on) = occurred_on),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rfq_messages_doc ON rfq_messages(rfq_id, document_id) WHERE document_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_rfq_messages_rfq ON rfq_messages(rfq_id, occurred_on);
+CREATE UNIQUE INDEX idx_rfq_messages_doc ON rfq_messages(rfq_id, document_id) WHERE document_id IS NOT NULL;
+CREATE INDEX idx_rfq_messages_rfq ON rfq_messages(rfq_id, occurred_on);
 
 -- ---------- Vendor hub ----------
 
-CREATE TABLE IF NOT EXISTS purchase_orders (
+CREATE TABLE purchase_orders (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   quote_id INTEGER REFERENCES quotes(id),
@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS invoices (
+CREATE TABLE invoices (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   po_id INTEGER REFERENCES purchase_orders(id),
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 
 -- ---------- Support ----------
 
-CREATE TABLE IF NOT EXISTS exchange_rates (
+CREATE TABLE exchange_rates (
   currency TEXT PRIMARY KEY CHECK (length(currency) = 3 AND currency = upper(currency)),
   rate_to_usd REAL NOT NULL CHECK (rate_to_usd > 0),
   as_of_date TEXT NOT NULL CHECK (date(as_of_date) = as_of_date)
@@ -297,20 +297,20 @@ WHERE q.review_status != 'rejected'
 
 -- ---------- Indexes on foreign keys ----------
 
-CREATE INDEX IF NOT EXISTS idx_documents_vendor           ON documents(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_invitations_vendor         ON rfq_invitations(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_quotes_vendor              ON quotes(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_quotes_rfq                 ON quotes(rfq_id);
-CREATE INDEX IF NOT EXISTS idx_rfq_vendor                 ON rfqs(awarded_vendor_id);
-CREATE INDEX IF NOT EXISTS idx_rfq_items_rfq_id           ON rfq_items(rfq_id);
-CREATE INDEX IF NOT EXISTS idx_rfq_invitations_rfq_id     ON rfq_invitations(rfq_id);
-CREATE INDEX IF NOT EXISTS idx_rfq_invitations_vendor_id  ON rfq_invitations(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_quotes_supersedes          ON quotes(supersedes_quote_id);
-CREATE INDEX IF NOT EXISTS idx_line_items_quote           ON quote_line_items(quote_id);
-CREATE INDEX IF NOT EXISTS idx_tiers_quote                ON quote_price_tiers(quote_id);
-CREATE INDEX IF NOT EXISTS idx_extractions_status         ON extractions(status);
-CREATE INDEX IF NOT EXISTS idx_legal_vendor               ON legal_documents(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_legal_expiry               ON legal_documents(expiry_date);
-CREATE INDEX IF NOT EXISTS idx_po_vendor                  ON purchase_orders(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_vendor            ON invoices(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_po                ON invoices(po_id);
+CREATE INDEX idx_documents_vendor           ON documents(vendor_id);
+CREATE INDEX idx_invitations_vendor         ON rfq_invitations(vendor_id);
+CREATE INDEX idx_quotes_vendor              ON quotes(vendor_id);
+CREATE INDEX idx_quotes_rfq                 ON quotes(rfq_id);
+CREATE INDEX idx_rfq_vendor                 ON rfqs(awarded_vendor_id);
+CREATE INDEX idx_rfq_items_rfq_id           ON rfq_items(rfq_id);
+CREATE INDEX idx_rfq_invitations_rfq_id     ON rfq_invitations(rfq_id);
+CREATE INDEX idx_rfq_invitations_vendor_id  ON rfq_invitations(vendor_id);
+CREATE INDEX idx_quotes_supersedes          ON quotes(supersedes_quote_id);
+CREATE INDEX idx_line_items_quote           ON quote_line_items(quote_id);
+CREATE INDEX idx_tiers_quote                ON quote_price_tiers(quote_id);
+CREATE INDEX idx_extractions_status         ON extractions(status);
+CREATE INDEX idx_legal_vendor               ON legal_documents(vendor_id);
+CREATE INDEX idx_legal_expiry               ON legal_documents(expiry_date);
+CREATE INDEX idx_po_vendor                  ON purchase_orders(vendor_id);
+CREATE INDEX idx_invoices_vendor            ON invoices(vendor_id);
+CREATE INDEX idx_invoices_po                ON invoices(po_id);
