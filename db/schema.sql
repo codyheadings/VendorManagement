@@ -1,6 +1,6 @@
 -- ---------- Vendors ----------
 
-CREATE TABLE vendors (
+CREATE TABLE IF NOT EXISTS vendors (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   normalized_name TEXT NOT NULL UNIQUE,
@@ -11,7 +11,7 @@ CREATE TABLE vendors (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
 
-CREATE TABLE vendor_contacts (
+CREATE TABLE IF NOT EXISTS vendor_contacts (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -30,7 +30,7 @@ CREATE UNIQUE INDEX idx_one_primary_contact
 
 -- ---------- Documents ----------
 
-CREATE TABLE documents (
+CREATE TABLE IF NOT EXISTS documents (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER REFERENCES vendors(id),
   file_name TEXT NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE documents (
 
 -- ---------- RFQs ----------
 
-CREATE TABLE rfqs (
+CREATE TABLE IF NOT EXISTS rfqs (
   id INTEGER PRIMARY KEY,
   rfq_number TEXT NOT NULL UNIQUE,
   document_id INTEGER REFERENCES documents(id),   -- source file, if any
@@ -60,7 +60,7 @@ CREATE TABLE rfqs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')) CHECK (due_date IS NULL OR due_date >= issue_date),
 ) STRICT;
 
-CREATE TABLE rfq_items (
+CREATE TABLE IF NOT EXISTS rfq_items (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   line_number INTEGER NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE rfq_items (
   UNIQUE (rfq_id, line_number)
 ) STRICT;
 
-CREATE TABLE rfq_specifications (
+CREATE TABLE IF NOT EXISTS rfq_specifications (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   line_number INTEGER NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE rfq_specifications (
   UNIQUE (rfq_id, line_number)
 ) STRICT;
 
-CREATE TABLE rfq_quote_requirements (
+CREATE TABLE IF NOT EXISTS rfq_quote_requirements (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   line_number INTEGER NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE rfq_quote_requirements (
   UNIQUE (rfq_id, line_number)
 ) STRICT;
 
-CREATE TABLE rfq_invitations (
+CREATE TABLE IF NOT EXISTS rfq_invitations (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
@@ -104,7 +104,7 @@ CREATE TABLE rfq_invitations (
 
 -- ---------- Quotes ----------
 
-CREATE TABLE quotes (
+CREATE TABLE IF NOT EXISTS quotes (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   rfq_id INTEGER REFERENCES rfqs(id),
@@ -137,7 +137,7 @@ CREATE TABLE quotes (
   CHECK (valid_until IS NULL OR quote_date IS NULL OR valid_until >= quote_date)
 ) STRICT;
 
-CREATE TABLE quote_line_items (
+CREATE TABLE IF NOT EXISTS quote_line_items (
   id INTEGER PRIMARY KEY,
   quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
   description TEXT NOT NULL,              -- original language
@@ -152,7 +152,7 @@ CREATE TABLE quote_line_items (
 
 
 -- Quantity-dependent price tables ("500 g - 999 g: 36000 per kg"), kept as quoted.
-CREATE TABLE quote_price_tiers (
+CREATE TABLE IF NOT EXISTS quote_price_tiers (
   id INTEGER PRIMARY KEY,
   quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
   min_quantity REAL CHECK (min_quantity >= 0),
@@ -165,7 +165,7 @@ CREATE TABLE quote_price_tiers (
 
 -- ---------- Legal documents ----------
 
-CREATE TABLE legal_documents (
+CREATE TABLE IF NOT EXISTS legal_documents (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   document_id INTEGER REFERENCES documents(id),
@@ -192,7 +192,7 @@ CREATE TABLE legal_documents (
 -- One row per doc. Keeps the raw result (including FAILED ones, so nothing silently
 -- disappears), and carries emails that create no record (questions, notices) as open actions.
 
-CREATE TABLE extractions (
+CREATE TABLE IF NOT EXISTS extractions (
   id INTEGER PRIMARY KEY,
   document_id INTEGER NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
   doc_type TEXT NOT NULL CHECK (doc_type IN ('quote','legal','email','invoice','other')),
@@ -214,7 +214,7 @@ CREATE TABLE extractions (
 
 -- ---------- RFQ history: follow-ups, vendor questions, notes ----------
 
-CREATE TABLE rfq_messages (
+CREATE TABLE IF NOT EXISTS rfq_messages (
   id INTEGER PRIMARY KEY,
   rfq_id INTEGER NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
   vendor_id INTEGER REFERENCES vendors(id),
@@ -232,7 +232,7 @@ CREATE INDEX idx_rfq_messages_rfq ON rfq_messages(rfq_id, occurred_on);
 
 -- ---------- Vendor hub ----------
 
-CREATE TABLE purchase_orders (
+CREATE TABLE IF NOT EXISTS purchase_orders (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   quote_id INTEGER REFERENCES quotes(id),
@@ -246,7 +246,7 @@ CREATE TABLE purchase_orders (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
 
-CREATE TABLE invoices (
+CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY,
   vendor_id INTEGER NOT NULL REFERENCES vendors(id),
   po_id INTEGER REFERENCES purchase_orders(id),
@@ -268,7 +268,7 @@ CREATE TABLE invoices (
 
 -- ---------- Support ----------
 
-CREATE TABLE exchange_rates (
+CREATE TABLE IF NOT EXISTS exchange_rates (
   currency TEXT PRIMARY KEY CHECK (length(currency) = 3 AND currency = upper(currency)),
   rate_to_usd REAL NOT NULL CHECK (rate_to_usd > 0),
   as_of_date TEXT NOT NULL CHECK (date(as_of_date) = as_of_date)

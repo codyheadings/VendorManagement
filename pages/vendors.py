@@ -7,6 +7,7 @@ from st_helpers.add_vendor_dialog import show_rfq_form
 from st_helpers.upload_dialog import show_upload_dialog
 from st_helpers.vendor_dialogs import *
 
+db.ensure_db()
 st.set_page_config(
     page_title="Dashboard",
     layout="wide"

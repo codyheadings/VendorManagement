@@ -94,12 +94,10 @@ def is_initialized() -> bool:
 
 
 def ensure_db() -> None:
-    """Build the schema (and seed) if the DB is missing."""
-    if is_initialized():
-        return
+    """Build the schema if the DB is missing."""
+    # if is_initialized():
+    #     return
     init_db()
-    import extraction.seed as seed
-    seed.run()
 
 
 if __name__ == "__main__":
